@@ -15,7 +15,7 @@ using Windows.Win32.Graphics.Dxgi.Common;
 using Windows.Win32.System.WinRT;
 using WinRT;
 
-namespace FloatSoda.Samples.ChromeView;
+namespace FloatSoda.Apps.ScreenView;
 
 /// <summary>
 /// 指定されたトップレベルウィンドウを Windows Graphics Capture で連続的にキャプチャし、
@@ -178,7 +178,7 @@ public sealed class WindowCaptureSession : IDisposable
         var item = CreateCaptureItemForWindow(hwnd);
         if (item is null)
         {
-            Console.Error.WriteLine($"[ChromeView] 切替先 (HWND=0x{hwnd:X}) のキャプチャ対象を作成できませんでした。現状を維持します。");
+            Console.Error.WriteLine($"[ScreenView] 切替先 (HWND=0x{hwnd:X}) のキャプチャ対象を作成できませんでした。現状を維持します。");
             return false;
         }
 

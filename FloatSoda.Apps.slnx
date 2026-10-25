@@ -1,6 +1,6 @@
 <Solution>
     <Folder Name="/apps/">
-        <Project Path="apps/ChromeView/FloatSoda.Samples.ChromeView.csproj" />
+        <Project Path="apps/ScreenView/FloatSoda.Apps.ScreenView.csproj" />
         <Project Path="apps/WristAgent/FloatSoda.Samples.WristAgent.csproj" />
     </Folder>
     <Folder Name="/tools/">

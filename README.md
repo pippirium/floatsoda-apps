@@ -10,14 +10,22 @@ SteamVR オーバーレイの実用アプリ集。フレームワーク(FloatSod
 |---|---|
 | `engine/` | git submodule → `pippirium/FloatSoda` の main を pin。フレームワーク変更は fork 側で行い、ここでは pin の更新だけを行う |
 | `apps/WristAgent/` | 左腕の腕時計位置に AI エージェントの承認要求カードを出すアプリ(`apps/WristAgent/README.md` 参照) |
-| `apps/ChromeView/` | Chrome(デスクトップ画面)を VR オーバーレイに表示するアプリ |
+| `apps/ScreenView/` | 任意のウィンドウ(デスクトップ画面)を VR オーバーレイに表示するアプリ |
 
 ## 起動(SteamVR 起動中)
 
 ```powershell
 dotnet run --project apps/WristAgent
-dotnet run --project apps/ChromeView
+dotnet run --project apps/ScreenView
 ```
+
+### 旧 `ChromeView` の登録を解除するには
+
+`apps/ChromeView` は `apps/ScreenView` へ改名し、SteamVR の `app_key` も
+`floatsoda.sample.chromeview` → `floatsoda.apps.screenview` に変更しました。
+改名前に自動起動を ON にしていた環境では、旧キー `floatsoda.sample.chromeview` の登録が
+SteamVR の「オーバーレイアプリ」設定に残ります。設定画面から手動で解除してください
+(解除しなくても新キーでの自動起動には影響しません)。
 
 ## エンジンを更新するとき
 

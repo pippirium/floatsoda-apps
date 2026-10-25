@@ -6,7 +6,7 @@ using FloatSoda.Widgets;
 using FloatSoda.Widgets.Layout;
 using SkiaSharp;
 
-namespace FloatSoda.Samples.ChromeView;
+namespace FloatSoda.Apps.ScreenView;
 
 /// <summary>
 /// 指定されたウィンドウのライブキャプチャを自身の領域へ表示するStatefulWidgetです。
@@ -19,11 +19,11 @@ namespace FloatSoda.Samples.ChromeView;
 /// </para>
 /// <para>
 /// 操作部(クリック・スクロール)はここでは実装していません(表示専用)。
-/// ポインタ入力はダッシュボード オーバーレイにのみ繋がる前提です
-/// (<c>docs/Home.md</c> の実装状況参照)。
+/// movable オーバーレイのポインタ入力(コントローラーレイ + 左トリガー)が
+/// FloatSoda に統合済みです。
 /// </para>
 /// </remarks>
-public record ChromeViewWidget : StatefulWidget<ChromeViewWidget>
+public record ScreenViewWidget : StatefulWidget<ScreenViewWidget>
 {
     /// <summary>キャプチャするウィンドウのハンドル。</summary>
     public required nint WindowHandle { get; init; }
@@ -50,9 +50,9 @@ public record ChromeViewWidget : StatefulWidget<ChromeViewWidget>
     public WindowCaptureSession? Session { get; init; }
 
     /// <inheritdoc />
-    public override State<ChromeViewWidget> CreateState() => new ChromeViewState();
+    public override State<ScreenViewWidget> CreateState() => new ScreenViewState();
 
-    private sealed class ChromeViewState : State<ChromeViewWidget>
+    private sealed class ScreenViewState : State<ScreenViewWidget>
     {
         private WindowCaptureSession? _session;
         private bool _ownedSession;
@@ -74,7 +74,7 @@ public record ChromeViewWidget : StatefulWidget<ChromeViewWidget>
             _session.Failed += message =>
             {
                 // オーバーレイ表示に加えてコンソールにも出す(切分け用)。
-                Console.Error.WriteLine($"[ChromeView] {message}");
+                Console.Error.WriteLine($"[ScreenView] {message}");
                 SetState(() => _message = message);
             };
             _session.Start(Widget!.WindowHandle);

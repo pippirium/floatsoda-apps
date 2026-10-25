@@ -6,7 +6,7 @@ using FloatSoda.OVR.Exceptions;
 using FloatSoda.OVR.Math;
 using FloatSoda.OVR.Overlay;
 
-namespace FloatSoda.Samples.ChromeView;
+namespace FloatSoda.Apps.ScreenView;
 
 /// <summary>
 /// ワールド空間に浮かぶオーバーレイ パネルをコントローラで操作する入力ループ。
@@ -255,12 +255,12 @@ public sealed class OverlayManipulator : IDisposable
         if (visible)
         {
             OpenVR.Overlay.HideOverlay(_handle).ThrowIfError();
-            Console.WriteLine("[ChromeView] パネルを非表示にしました(再度コマンドで表示)");
+            Console.WriteLine("[ScreenView] パネルを非表示にしました(再度コマンドで表示)");
         }
         else
         {
             OpenVR.Overlay.ShowOverlay(_handle).ThrowIfError();
-            Console.WriteLine("[ChromeView] パネルを表示しました");
+            Console.WriteLine("[ScreenView] パネルを表示しました");
         }
     }
 

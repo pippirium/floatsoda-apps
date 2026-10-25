@@ -1,6 +1,6 @@
 # floatsoda-apps 移植計画
 
-ChromeView(Chrome / デスクトップ画面の VR オーバーレイ共有)と WristAgent(腕への
+ChromeView(Chrome / デスクトップ画面の VR オーバーレイ共有・現 `apps/ScreenView`)と WristAgent(腕への
 エージェント承認 UI)を、FloatSoda フレームワークから独立したアプリリポジトリとして
 切り出すための計画。
 
@@ -9,7 +9,7 @@ ChromeView(Chrome / デスクトップ画面の VR オーバーレイ共有)と 
 | レイヤ | 場所 | 変更の流れ |
 |---|---|---|
 | フレームワーク(エンジン部分) | fork `pippirium/FloatSoda`(submodule で pin) | **fork で branch を切って作業 → fork main へ merge(必要なら fork 内 PR)→ 本リポジトリは submodule の pin 更新で取り込む** |
-| アプリ機能部分 | 本リポジトリ(WristAgent / ChromeView / bridge tool) | ここで自由に開発。必要なエンジン変更は fork 側で作り、その結果を submodule で消費する |
+| アプリ機能部分 | 本リポジトリ(WristAgent / ScreenView / bridge tool) | ここで自由に開発。必要なエンジン変更は fork 側で作り、その結果を submodule で消費する |
 
 **前提(位置づけ)**: fork は **上流に取り込まれる想定のない、個人用カスタマイズ領域** です。
 
@@ -38,7 +38,7 @@ floatsoda-apps/
 │   └── (upstream 全体: src/ tests/ docs/ samples/)
 ├── apps/
 │   ├── WristAgent/            ← FloatSoda.Samples.WristAgent から移植
-│   └── ChromeView/            ← FloatSoda.Samples.ChromeView から移植
+│   └── ScreenView/            ← FloatSoda.Samples.ChromeView から移植 → ScreenView へ改名(PLAN-ScreenView.md)
 │       (OverlayManipulator を含む)
 └── tools/
     └── WristAgentBridge/      ← hooks 中継 + stdio MCP サーバー
@@ -126,7 +126,7 @@ pin 更新を本リポジトリでコミットする(忘れると本リポジト
    - **まずはコード改変なし**で動かす(移植差異を最小化するため)。動作確認後に改名を検討
    - ProjectReference を `../../engine/src/FloatSoda/FloatSoda.csproj` へ修正
    - slnx 登録
-5. `apps/ChromeView/`:
+5. `apps/ScreenView/`:
    - `engine/samples/FloatSoda.Samples.ChromeView/`(Program.cs + `OverlayManipulator.cs`)を移植
    - エンジン変更が要ることが判明したら、**fork 側で branch → commit → main merge** し、
      pin をあげてから使い続ける
@@ -138,9 +138,9 @@ pin 更新を本リポジトリでコミットする(忘れると本リポジト
 
 8. `dotnet build` — submodule の参照解決を確認
 9. 実機確認(SteamVR 起動中、HMD 着用):
-   - ChromeView: 画面がオーバーレイに出る
+   - ChromeView(現 ScreenView): 画面がオーバーレイに出る
    - WristAgent: 腕にカード・レーザー選択・OSK 入力・振動・ホットキー
-   - 併用: ChromeView を見ながら腕で承認要求を返せるか
+   - 併用: ScreenView を見ながら腕で承認要求を返せるか
 10. 移植後、fork 側の `samples/FloatSoda.Samples.WristAgent` と
     `tools/WristAgentBridge` を(fork 上のブランチでの削除コミット + main merge で)
     削除して、アプリ部分は本リポジトリが正とする(重複が残るとどちらが正か曖昧になる)。
