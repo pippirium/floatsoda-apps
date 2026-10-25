@@ -1,0 +1,9 @@
+<Solution>
+    <Folder Name="/apps/">
+        <Project Path="apps/ChromeView/FloatSoda.Samples.ChromeView.csproj" />
+        <Project Path="apps/WristAgent/FloatSoda.Samples.WristAgent.csproj" />
+    </Folder>
+    <Folder Name="/tools/">
+        <Project Path="tools/WristAgentBridge/WristAgentBridge.csproj" />
+    </Folder>
+</Solution>

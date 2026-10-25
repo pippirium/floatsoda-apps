@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- オーバーレイキーがエントリアセンブリ名由来のため、移植元(samples/FloatSoda.Samples.WristAgent)と同じ名前を固定する -->
+    <AssemblyName>FloatSoda.Samples.WristAgent</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\engine\src\FloatSoda\FloatSoda.csproj" />
+  </ItemGroup>
+
+</Project>

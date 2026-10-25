@@ -8,7 +8,7 @@ ChromeView(Chrome / デスクトップ画面の VR オーバーレイ共有)と 
 
 | レイヤ | 場所 | 変更の流れ |
 |---|---|---|
-| フレームワーク(エンジン部分) | fork `t22m003/FloatSoda`(submodule で pin) | **fork で branch を切って作業 → fork main へ merge(必要なら fork 内 PR)→ 本リポジトリは submodule の pin 更新で取り込む** |
+| フレームワーク(エンジン部分) | fork `pippirium/FloatSoda`(submodule で pin) | **fork で branch を切って作業 → fork main へ merge(必要なら fork 内 PR)→ 本リポジトリは submodule の pin 更新で取り込む** |
 | アプリ機能部分 | 本リポジトリ(WristAgent / ChromeView / bridge tool) | ここで自由に開発。必要なエンジン変更は fork 側で作り、その結果を submodule で消費する |
 
 **前提(位置づけ)**: fork は **上流に取り込まれる想定のない、個人用カスタマイズ領域** です。
@@ -34,7 +34,7 @@ floatsoda-apps/
 ├── PLAN.md                    ← 本書
 ├── README.md                  ← アプリ全体の説明・起動方法・エージェント接続手順
 ├── .gitignore                 ← .NET 標準(floatsoda リポジトリから流用)
-├── engine/                    ← git submodule → fork(t22m003/FloatSoda main を pin)
+├── engine/                    ← git submodule → fork(pippirium/FloatSoda main を pin)
 │   └── (upstream 全体: src/ tests/ docs/ samples/)
 ├── apps/
 │   ├── WristAgent/            ← FloatSoda.Samples.WristAgent から移植
@@ -72,7 +72,7 @@ git checkout -b <slug>
 git add -A && git commit
 
 # 2) fork main へ merge。fork 内 PR(base=main)経由でも、ローカル merge でもよい
-#    - PR を使う場合: github 上で t22m003/FloatSoda の main を base に PR → merge
+#    - PR を使う場合: github 上で pippirium/FloatSoda の main を base に PR → merge
 #      (本リポジトリから gh pr create --base main --head <slug> でも可)
 git checkout main
 git merge --no-ff <slug>          # 競合時は自分で解消
@@ -102,7 +102,7 @@ pin 更新を本リポジトリでコミットする(忘れると本リポジト
 
 ### Phase A — fork main の整備
 
-1. fork(`t22m003/FloatSoda`)の `main` に、実装済みブランチを merge する
+1. fork(`pippirium/FloatSoda`)の `main` に、実装済みブランチを merge する
    (fork 内 PR での merge でもローカル merge でも可)
    - `182-device-tracked-pointer`(ControllerRayPointerSource / OverlayWindow 一般化 /
      OverlayKeyboard / FloatSodaApp.Post / docs 更新 + WristAgent サンプル・bridge tool)
@@ -114,7 +114,7 @@ pin 更新を本リポジトリでコミットする(忘れると本リポジト
 2. merge 結果を fork に push する(上流へは何も送らない)
 3. submodule 登録:
    ```bash
-   git submodule add https://github.com/t22m003/FloatSoda.git engine
+   git submodule add https://github.com/pippirium/FloatSoda.git engine
    cd engine && git checkout <merge済みの main HEAD> && cd ..
    git commit -m "chore(engine): FloatSoda(fork) を pin"
    ```

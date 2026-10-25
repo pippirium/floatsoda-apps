@@ -1,0 +1,23 @@
+{
+	"applications": [
+		{
+			"app_key": "floatsoda.sample.chromeview",
+
+			"launch_type": "binary",
+			"binary_path_windows": "FloatSoda.Samples.ChromeView.exe",
+			"arguments": "",
+
+			"image_path": "chromeview_icon.png",
+			"is_dashboard_overlay": true,
+
+			"strings": {
+				"en_us": {
+					"name": "FloatSoda Chrome View"
+				},
+				"ja_jp": {
+					"name": "FloatSoda Chrome View"
+				}
+			}
+		}
+	]
+}
