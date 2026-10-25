@@ -1,0 +1,23 @@
+{
+	"applications": [
+		{
+			"app_key": "floatsoda.apps.screenview",
+
+			"launch_type": "binary",
+			"binary_path_windows": "FloatSoda.Apps.ScreenView.exe",
+			"arguments": "",
+
+			"image_path": "screenview_icon.png",
+			"is_dashboard_overlay": true,
+
+			"strings": {
+				"en_us": {
+					"name": "FloatSoda Screen View"
+				},
+				"ja_jp": {
+					"name": "FloatSoda Screen View"
+				}
+			}
+		}
+	]
+}

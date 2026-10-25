@@ -7,6 +7,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- オーバーレイキーがエントリアセンブリ名由来のため、csproj 名と一致させて固定する -->
+    <AssemblyName>FloatSoda.Apps.ScreenView</AssemblyName>
   </PropertyGroup>
 
   <ItemGroup>
@@ -23,8 +25,8 @@
 
   <ItemGroup>
     <!-- SteamVR 自動起動の登録に使うアプリケーション マニフェスト。exe と同じ場所に配置する。 -->
-    <None Include="chromeview.vrmanifest" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="chromeview_icon.png" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="screenview.vrmanifest" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="screenview_icon.png" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

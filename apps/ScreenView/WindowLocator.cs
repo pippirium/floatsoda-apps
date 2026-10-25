@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 using Windows.Win32;
 using Windows.Win32.Foundation;
 
-namespace FloatSoda.Samples.ChromeView;
+namespace FloatSoda.Apps.ScreenView;
 
 /// <summary>キャプチャ対象候補になるトップレベルウィンドウの情報。</summary>
 public readonly record struct WindowInfo(nint Handle, string Title, string ProcessName, uint ProcessId);

@@ -1,13 +1,13 @@
 using FloatSoda;
 using FloatSoda.Abstractions.Geometries;
 using FloatSoda.OVR;
-using FloatSoda.Samples.ChromeView;
+using FloatSoda.Apps.ScreenView;
 using FloatSoda.Widgets;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using SkiaSharp;
 
-// 自分のHMD上でChrome等のウィンドウを見るサンプル。
+// 自分のHMD上で任意のウィンドウの画面を見るアプリ。
 // Windows Graphics Capture でアプリ単位の画面を取り込み、FloatSoda の
 // RenderImage でリアルタイムに表示します。操作はまだ含みません(表示専用)。
 //
@@ -95,7 +95,7 @@ if (saveIndex >= 0)
 var builder = Host.CreateApplicationBuilder(args);
 builder.Services.AddFloatSoda(new FloatSodaOptions
 {
-    // SteamVR vrmanifest(chromeview.vrmanifest)の app_key と一致させ、IdentifyApplication /
+    // SteamVR vrmanifest(screenview.vrmanifest)の app_key と一致させ、IdentifyApplication /
     // 自動起動連携が正しく機能するようにする。
     AppKey = new AppKey(SteamVrAutoLaunch.AppKey),
 });
@@ -106,7 +106,7 @@ var app = host.Services.GetRequiredService<FloatSodaApp>();
 // プログラムで保持して対象切替から使うため外部生成。Start はウィジェット側が行う。
 var captureSession = new WindowCaptureSession(fpsLimit);
 
-var widget = new ChromeViewWidget
+var widget = new ScreenViewWidget
 {
     WindowHandle = target.Handle,
     MaxFps = fpsLimit,
@@ -119,12 +119,12 @@ var widget = new ChromeViewWidget
 // SteamVR Homeなどコントローラを開かずにワールド空間へ直接表示する。
 app.CreateWindow(
     useDesktop
-        ? new DesktopWindow { Title = "Chrome View", Child = widget }
+        ? new DesktopWindow { Title = "Screen View", Child = widget }
         : useDashboard
-            ? new DashboardWindow { Dpm = new Dpm(1600), Title = "Chrome View", Child = widget }
+            ? new DashboardWindow { Dpm = new Dpm(1600), Title = "Screen View", Child = widget }
             : new WorldSpaceWindow
             {
-                Title = "Chrome View",
+                Title = "Screen View",
                 Size = new SKSize(1920, 1080),
                 Child = widget,
                 Position = worldPosition == System.Numerics.Vector3.Zero
@@ -147,7 +147,7 @@ if (!useDesktop)
     // SteamVR 自動起動の vrmanifest 登録は OpenVR コンテキストが整うのを待って行うので背景で試す(非致命)。
     _ = Task.Run(SteamVrAutoLaunch.Register);
 
-    manipulator = new OverlayManipulator("Chrome View", toggleSpec, switchSpec);
+    manipulator = new OverlayManipulator("Screen View", toggleSpec, switchSpec);
     manipulator.TargetSwitchRequested += () =>
     {
         var candidates = WindowLocator.EnumerateVisibleWindows()
@@ -155,7 +155,7 @@ if (!useDesktop)
             .ToList();
         if (candidates.Count == 0)
         {
-            Console.Error.WriteLine("[ChromeView] 切替先の候補ウィンドウがありません。");
+            Console.Error.WriteLine("[ScreenView] 切替先の候補ウィンドウがありません。");
             return;
         }
 
@@ -182,7 +182,7 @@ return 0;
 /// <remarks>SteamVR に接続しません。WGC の取り込みと D3D11(staging / Map / Copy) 経路の検証用です。</remarks>
 static async Task<int> SaveFramesAsync(WindowInfo target, string framesOption)
 {
-    var sampleDirectory = Path.Combine(Path.GetTempPath(), "FloatSodaChromeView");
+    var sampleDirectory = Path.Combine(Path.GetTempPath(), "FloatSodaScreenView");
     Directory.CreateDirectory(sampleDirectory);
 
     var count = int.TryParse(framesOption, out var parsedCount) && parsedCount > 0 ? parsedCount : 1;
