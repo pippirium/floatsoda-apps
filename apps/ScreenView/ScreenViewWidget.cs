@@ -1,15 +1,20 @@
 using FloatSoda.Elements;
+using FloatSoda.Gesture;
 using FloatSoda.Geometrics;
+using FloatSoda.Painting;
 using FloatSoda.RenderObjects;
 using FloatSoda.RenderObjects.Painting;
 using FloatSoda.Widgets;
+using FloatSoda.Widgets.Gesture;
 using FloatSoda.Widgets.Layout;
+using FloatSoda.Widgets.Paint;
 using SkiaSharp;
 
 namespace FloatSoda.Apps.ScreenView;
 
 /// <summary>
-/// 指定されたウィンドウのライブキャプチャを自身の領域へ表示するStatefulWidgetです。
+/// 指定されたウィンドウのライブキャプチャを自身の領域へ表示し、上部のヘッダーバーと
+/// オーバーレイ上のシートからキャプチャ対象を選べるようにするStatefulWidgetです。
 /// </summary>
 /// <remarks>
 /// <para>
@@ -18,9 +23,12 @@ namespace FloatSoda.Apps.ScreenView;
 /// セッションは<see cref="MaxFps"/>の上限でフレームを供給します。
 /// </para>
 /// <para>
-/// 操作部(クリック・スクロール)はここでは実装していません(表示専用)。
-/// movable オーバーレイのポインタ入力(コントローラーレイ + 左トリガー)が
-/// FloatSoda に統合済みです。
+/// 対象切替はセッションを作り直さず<see cref="WindowCaptureSession.SwitchTarget"/>を呼ぶだけ。
+/// プール再作成による最初の数フレームの空白は、シートで覆われているため視覚的ノイズになりません。
+/// </para>
+/// <para>
+/// 操作部は<see cref="GestureDetector"/>で実装しています。movable オーバーレイのポインタ入力
+/// (コントローラーレイ + 左トリガー)が FloatSoda に統合済みです。
 /// </para>
 /// </remarks>
 public record ScreenViewWidget : StatefulWidget<ScreenViewWidget>
@@ -43,11 +51,45 @@ public record ScreenViewWidget : StatefulWidget<ScreenViewWidget>
 
     /// <summary>外部で作成したキャプチャ セッション。既定は null(内部で生成します)。</summary>
     /// <remarks>
-    /// 対象切替(OverlayManipulator → <see cref="WindowCaptureSession.SwitchTarget"/>)を
+    /// 対象切替(<see cref="WindowCaptureSession.SwitchTarget"/>)を
     /// セッション越しに行いたい場合に注入します。注入側は <see cref="WindowCaptureSession.Start"/> を
     /// 呼ばず、<see cref="State"/> 側がハンドル指定で開始します。
     /// </remarks>
     public WindowCaptureSession? Session { get; init; }
+
+    /// <summary>候補ウィンドウを列挙する関数。ピッカーを開くときと [再列挙] のときだけ呼ばれます。</summary>
+    /// <remarks>
+    /// Win32 のウィンドウ/プロセス列挙を含むため、呼び出し側はメインループを止めないよう
+    /// バックグラウンド スレッドで実行し、結果を <see cref="OfferCandidates"/> で返します。
+    /// </remarks>
+    public Func<IReadOnlyList<WindowInfo>>? CandidateEnumerator { get; init; }
+
+    /// <summary>候補の再列挙を裏スレッドへ要求する関数。既定は <see cref="CandidateEnumerator"/> をその場で実行する。</summary>
+    /// <remarks>
+    /// 指定した場合、ウィジェットは自分で列挙せずこの関数だけを呼ぶ。呼び出し側は完了後に
+    /// <see cref="OfferCandidates"/> をメインスレッドから呼んで結果を返すこと。
+    /// 裏スレッドから呼ばれるため、State のものではなく呼び出し側が用意した
+    /// <c>FloatSodaApp.Post</c> を使う必要がある。
+    /// </remarks>
+    public Action? RequestCandidateRefresh { get; set; }
+
+    /// <summary>ピッカーの開閉を外部(コントローラ割当)から要求するための口。</summary>
+    /// <remarks>
+    /// ウィジェットが <c>null</c> でない側へマウント中に限り設定される。コントローラ入力ループ
+    /// (メインループ以外のスレッド)から呼ぶ場合は、必ず <c>FloatSodaApp.Post</c> 経由で
+    /// メインスレッドへ転送してください。
+    /// </remarks>
+    public Action? TogglePickerRequested { get; set; }
+
+    /// <summary>候補の列挙結果を渡す口。開いているページの送りもここで行う。</summary>
+    /// <remarks>
+    /// 裏スレッドで列挙した結果を <c>FloatSodaApp.Post</c> 経由でメインスレッドから呼ぶ。
+    /// シートが閉じているときは無視する(開き直し時に必ず再列挙するため、古い結果を保持しない)。
+    /// </remarks>
+    public Action<IReadOnlyList<WindowInfo>>? OfferCandidates { get; set; }
+
+    /// <summary>シートを開いているかどうか。開閉判定は状態側が持つため、参照のみ提供する。</summary>
+    public Func<bool>? IsPickerOpen { get; set; }
 
     /// <inheritdoc />
     public override State<ScreenViewWidget> CreateState() => new ScreenViewState();
@@ -58,10 +100,15 @@ public record ScreenViewWidget : StatefulWidget<ScreenViewWidget>
         private bool _ownedSession;
         private SKImage? _frame;
         private string? _message;
+        private nint _currentHandle;
+        private bool _pickerOpen;
+        private IReadOnlyList<WindowInfo> _candidates = [];
+        private string? _candidateMessage;
 
         public override void InitState()
         {
-            if (Widget!.WindowHandle == 0)
+            _currentHandle = Widget!.WindowHandle;
+            if (_currentHandle == 0)
             {
                 _message = "キャプチャ対象のウィンドウが指定されていません。";
                 return;
@@ -77,7 +124,98 @@ public record ScreenViewWidget : StatefulWidget<ScreenViewWidget>
                 Console.Error.WriteLine($"[ScreenView] {message}");
                 SetState(() => _message = message);
             };
-            _session.Start(Widget!.WindowHandle);
+            _session.Start(_currentHandle);
+
+            // コントローラの長押し割当はバックグラウンド スレッドで発火するため、
+            // SetState を呼ぶのは常にメインスレッドに限定する。要求口はウィジェットへ差し出す。
+            BindHooks();
+        }
+
+        public override void DidUpdateWidget(ScreenViewWidget oldWidget)
+        {
+            // ウィジェットが差し替わったら、要求口を新しい側へ結び直す。
+            UnbindHooks(oldWidget);
+            BindHooks();
+        }
+
+        /// <summary>現在のウィジェットへ外部からの要求口を登録する。</summary>
+        private void BindHooks()
+        {
+            Widget!.TogglePickerRequested = TogglePicker;
+            Widget!.OfferCandidates = OfferCandidates;
+            Widget!.IsPickerOpen = () => _pickerOpen;
+        }
+
+        /// <summary>古いウィジェットから要求口を外す。</summary>
+        private static void UnbindHooks(ScreenViewWidget? oldWidget)
+        {
+            if (oldWidget is null) return;
+            oldWidget.TogglePickerRequested = null;
+            oldWidget.OfferCandidates = null;
+            oldWidget.IsPickerOpen = null;
+        }
+
+        /// <summary>メインスレッドから呼ばれる。シートの開閉と候補の再列挙要求を行う。</summary>
+        private void TogglePicker()
+        {
+            if (_pickerOpen)
+            {
+                SetState(() => _pickerOpen = false);
+                return;
+            }
+
+            SetState(() =>
+            {
+                _pickerOpen = true;
+                _candidateMessage = "候補を列挙しています…";
+            });
+            RefreshCandidates();
+        }
+
+        /// <summary>候補列挙を要求する。外部要求を優先し、無いときはその場で列挙する。</summary>
+        private void RefreshCandidates()
+        {
+            var requestRefresh = Widget!.RequestCandidateRefresh;
+            if (requestRefresh is not null)
+            {
+                requestRefresh();
+                return;
+            }
+
+            ApplyCandidates(Widget!.CandidateEnumerator?.Invoke() ?? []);
+        }
+
+        /// <summary>列挙結果を状態へ反映する。</summary>
+        private void OfferCandidates(IReadOnlyList<WindowInfo> candidates)
+        {
+            // シートが閉じている間の結果は保持しない(開き直し時に必ず再列挙する)。
+            if (!_pickerOpen) return;
+            ApplyCandidates(candidates);
+        }
+
+        private void ApplyCandidates(IReadOnlyList<WindowInfo> candidates)
+            => SetState(() =>
+            {
+                _candidates = candidates;
+                _candidateMessage = null;
+            });
+
+        /// <summary>行が選ばれたときの処理。対象を切り替えてシートを閉じる。</summary>
+        private void PickWindow(WindowInfo window)
+        {
+            var switched = _session?.SwitchTarget(window.Handle) ?? false;
+            if (switched)
+            {
+                // 切替が受け入れられたら表示のハンドルも追従させる(次回以降の既定対象)。
+                _currentHandle = window.Handle;
+                _message = Widget!.WaitMessage;
+            }
+            else
+            {
+                Console.Error.WriteLine($"[ScreenView] 切替先 (HWND=0x{window.Handle:X}) を受け入れられませんでした。");
+            }
+
+            SetState(() => _pickerOpen = false);
         }
 
         /// <summary>キャプチャ スレッドから呼ばれます(WatchWidget と同じ Timer + SetState のパターン)。</summary>
@@ -91,6 +229,64 @@ public record ScreenViewWidget : StatefulWidget<ScreenViewWidget>
         }
 
         public override Widget Build(IBuildContext context)
+        {
+            // ウィンドウの寸法を決める 1 枚。engine の RenderView は FixedSize
+            // (WindowWidget.Size)が無いとき子へ BoxConstraints.Unbounded を渡すため、
+            // オーバーレイの寸法をこのツリーで決める責任がある。
+            // 宣言した寸法をそのまま採用する OverflowBox(Fit.DeferToChild)を使い、Program.cs で
+            // オーバーレイに指定している解像度と揃えた寸法を渡す。中の Stack は Fit.Expand で
+            // その寸法へ広がる。
+            return new OverflowBox
+            {
+                MinWidth = OverlayWidth,
+                MaxWidth = OverlayWidth,
+                MinHeight = OverlayHeight,
+                MaxHeight = OverlayHeight,
+                Fit = OverflowBoxFit.DeferToChild,
+                Alignment = Alignment.TopLeft,
+                Child = new Stack { Fit = StackFit.Expand, Children = BuildStackChildren() },
+            };
+        }
+
+        private List<Widget> BuildStackChildren()
+        {
+            // Stack は Fit.Expand で一杯に広がっているが、engine の RenderStack は Positioned の
+            // Left/Right と Top/Bottom の両方が揃って初めてその寸法を割り出せるので、
+            // 高さを必要とするものは両方を揃えること(Expanded は主軸の最大が有限でなければならない)。
+            // 後ろに声明した子ほど前面へ描かれる。
+            var children = new List<Widget>
+            {
+                new Positioned { Top = 0, Left = 0, Right = 0, Bottom = 0, Child = BuildCapture() },
+                new Positioned { Top = 0, Left = 0, Right = 0, Height = HeaderBarHeight, Child = BuildHeaderBar() },
+            };
+
+            // シートはヘッダーバーの下から下端まで。ウィンドウ一杯のカバーを兼ねる
+            // (切替直後の空白フレームを覆う)。
+            if (_pickerOpen)
+            {
+                children.Add(new Positioned
+                {
+                    Top = HeaderBarHeight,
+                    Left = 0,
+                    Right = 0,
+                    Bottom = 0,
+                    Child = new WindowPickerPanel
+                    {
+                        Candidates = _candidates,
+                        ActiveHandle = _currentHandle,
+                        EmptyMessage = _candidateMessage ?? "候補ウィンドウがありません。",
+                        OnReload = RefreshCandidates,
+                        OnClose = () => SetState(() => _pickerOpen = false),
+                        OnPick = PickWindow,
+                    },
+                });
+            }
+
+            return children;
+        }
+
+        /// <summary>キャプチャ画像、または未取得のあいだの案内。</summary>
+        private Widget BuildCapture()
         {
             if (_frame is not null)
             {
@@ -109,8 +305,55 @@ public record ScreenViewWidget : StatefulWidget<ScreenViewWidget>
             };
         }
 
+        /// <summary>キャプチャ パネルの上部に常設するヘッダーバー(現在の対象名と [一覧])。</summary>
+        private Widget BuildHeaderBar()
+        {
+            // 候補の列挙前(シート未操作時)でもヘッダーに対象名を出せるよう、
+            // ショートカットの列挙はしない:分かっている名前だけ使い、分からなければアプリ名を出す。
+            WindowInfo? known = _candidates.FirstOrDefault(w => w.Handle == _currentHandle);
+            var label = known is { } k
+                ? $"{k.ProcessName} — {WindowTargets.ElideMiddle(k.Title, HeaderTitleMaxLength)}"
+                : "Screen View";
+
+            return new GestureDetector
+            {
+                Behaviour = HitTestBehaviour.Opaque,
+                Child = new ColoredBox
+                {
+                    Color = HeaderColor,
+                    Child = new Padding
+                    {
+                        Spacing = EdgeInsets.Symmetric(vertical: 8, horizontal: 14),
+                        Child = new Row
+                        {
+                            CrossAxisAlignment = CrossAxisAlignment.Center,
+                            Children =
+                            [
+                                new Expanded { Child = new Text(label) { Style = HeaderStyle } },
+                                new GestureDetector
+                                {
+                                    Behaviour = HitTestBehaviour.Opaque,
+                                    OnTap = TogglePicker,
+                                    Child = new ColoredBox
+                                    {
+                                        Color = ButtonColor,
+                                        Child = new Padding
+                                        {
+                                            Spacing = EdgeInsets.Symmetric(vertical: 6, horizontal: 16),
+                                            Child = new Text("一覧") { Style = ButtonTextStyle },
+                                        },
+                                    },
+                                },
+                            ],
+                        },
+                    },
+                },
+            };
+        }
+
         public override void Dispose()
         {
+            if (Widget is not null) UnbindHooks(Widget);
             if (_session is not null)
             {
                 _session.FrameUpdated -= OnFrame;
@@ -120,6 +363,24 @@ public record ScreenViewWidget : StatefulWidget<ScreenViewWidget>
             }
             base.Dispose();
         }
+
+        private const int HeaderTitleMaxLength = 48;
+
+        /// <summary>ヘッダーバーの高さ。シート先端の基準に使う。</summary>
+        private const double HeaderBarHeight = 46;
+
+        /// <summary>オーバーレイの既定の解像度。シート内の高さを確定させる基準に使う。</summary>
+        private const double OverlayWidth = 1920;
+        /// <summary><see cref="OverlayWidth"/> の高さ版。</summary>
+        private const double OverlayHeight = 1080;
+
+        private static readonly SKColor HeaderColor = SKColor.Parse("#111318");
+        private static readonly SKColor ButtonColor = SKColor.Parse("#3C4453");
+        private static readonly SKColor TextColor = SKColor.Parse("#E8EAED");
+        private static readonly SKColor AccentColor = SKColor.Parse("#8AB4F8");
+
+        private static readonly TextStyle HeaderStyle = new() { FontSize = 24, Color = TextColor };
+        private static readonly TextStyle ButtonTextStyle = new() { FontSize = 24, Color = AccentColor, FontWeight = 700 };
     }
 }
 

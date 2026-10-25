@@ -1,0 +1,67 @@
+namespace FloatSoda.Apps.ScreenView;
+
+/// <summary>
+/// キャプチャ対象の候補を列挙し、除外ルールを共有するヘルパー。
+/// </summary>
+/// <remarks>
+/// <para>
+/// 起動時の初期対象選択と、ウィンドウ ピッカーの両方から呼ぶ。除外ルールをここに一本化し、
+/// 呼び出し側で条件が diverge しないようにする。
+/// </para>
+/// <para>
+/// <see cref="WindowLocator.EnumerateVisibleWindows"/> は呼び出しごとにプロセスを開くため、
+/// <b>頻繁な呼び出しは想定外</b>。ピッカーではシートを開いた時点と [再読込] のときだけ呼ぶ。
+/// </para>
+/// </remarks>
+public static class WindowTargets
+{
+    /// <summary>シェル由来で対象にしても意味の無いウィンドウのプロセス名。</summary>
+    private static readonly string[] ExcludedProcessNames = ["explorer", "TextInputHost", "SearchHost", "StartMenuExperienceHost"];
+
+    /// <summary>自分自身のオーバーレイ ウィンドウを候補に入れないためのプロセスID。</summary>
+    private static readonly uint SelfProcessId = (uint)Environment.ProcessId;
+
+    /// <summary>除外を適用した候補ウィンドウを列挙します。</summary>
+    /// <remarks>呼び出し元のスレッドから Win32 を直接呼ぶ。バックグラウンド スレッドから呼ぶこと。</remarks>
+    public static IReadOnlyList<WindowInfo> EnumerateCandidates()
+    {
+        return WindowLocator
+            .EnumerateVisibleWindows()
+            .Where(w => w.ProcessId != SelfProcessId)
+            .Where(w => !ExcludedProcessNames.Contains(w.ProcessName, StringComparer.OrdinalIgnoreCase))
+            .ToList();
+    }
+
+    /// <summary>候補をプロセス名(アルファベット順)→ タイトル順のグループへまとめる。</summary>
+    public static IReadOnlyList<WindowTargetGroup> GroupByProcess(IReadOnlyList<WindowInfo> candidates)
+    {
+        return candidates
+            .GroupBy(w => w.ProcessName, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(g => new WindowTargetGroup(g.Key, [.. g.OrderBy(w => w.Title, StringComparer.Ordinal)]))
+            .ToList();
+    }
+
+    /// <summary>
+    /// タイトルを中央省略で短縮する。
+    /// </summary>
+    /// <remarks>
+    /// 先頭だけ切るのは「同じ前置きで始まる窓」の判別が効かないため、中点を置いて前後を残す。
+    /// </remarks>
+    public static string ElideMiddle(string text, int maxLength)
+    {
+        if (text.Length <= maxLength) return text;
+        if (maxLength <= 1) return "…"[..Math.Max(maxLength, 0)];
+
+        // 中点 1 文字を挟む前後の長さを決める(末尾に少し多く残す)。
+        var body = maxLength - 1;
+        var head = body / 2;
+        var tail = body - head;
+        return string.Concat(text.AsSpan(0, head), "…", text.AsSpan(text.Length - tail));
+    }
+}
+
+/// <summary>ウィンドウ ピッカーの表示単位。プロセス名とそのグループに属する候補。</summary>
+/// <param name="ProcessName">プロセス名(グループ ヘッダーに使う)。</param>
+/// <param name="Windows">このプロセスの候補ウィンドウ(タイトル順)。</param>
+public readonly record struct WindowTargetGroup(string ProcessName, IReadOnlyList<WindowInfo> Windows);
