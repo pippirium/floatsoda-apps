@@ -8,12 +8,13 @@ ChromeView(Chrome / デスクトップ画面の VR オーバーレイ共有)と 
 
 | レイヤ | 場所 | 変更の流れ |
 |---|---|---|
-| フレームワーク(エンジン部分) | 本リポジトリ内の `engine/`(git submodule) | 上流 `sumx21t/FloatSoda` の変更を submodule 更新で取り込む。自前の修正は fork に push し、上流へ PR |
+| フレームワーク(エンジン部分) | 本リポジトリ内の `engine/`(git submodule) | 上流 `sumx21t/FloatSoda` の変更を fork へ取り込んだ上で pin 更新で取り込む。上流への PR は出さない |
 | アプリ機能部分 | 本リポジトリ(WristAgent / ChromeView / bridge tool) | ここで自由に開発。エンジン非改変で済むものはここに集約 |
 
-原則: **エンジンの中で発見した不具合・新機能は上流(FloatSoda)へ PR で戻し、
-本リポジトリは submodule のコミット更新によってそれを取り込む**。
-本リポジトリにエンジンの差分を直接持たないため、上流追従が常に1コマンドで済む状態を保つ。
+原則: **エンジンの中で発見した不具合・新機能は fork(t22m003/FloatSoda)の
+ブランチで管理し、上流 sumx21t/FloatSoda へは PR を出さない**。
+本リポジトリにエンジンの差分を直接持たず、submodule の pin を更新するだけで
+fork のどの状態でも指せるため、上流追従と自前差分の運用が常に独立している。
 
 ## 2. 全体構成(目標形)
 
@@ -48,13 +49,16 @@ floatsoda-apps/
 submodule は「fork の branch を 1 本固めて pin する」という運用になる:
 
 ```bash
-# 上流の取り込み
+# 上流の取り込み(上流の新 commit を fork main へ取り込む)
 cd engine
 git checkout main
-git fetch origin && git merge --ff-only origin/main   # 上流 = sumx21t/FloatSoda
-# 自前修正は fork へ(必要なら上流へ PR)
+git remote add upstream https://github.com/sumx21t/FloatSoda.git   # 初回のみ
+git fetch upstream
+git merge upstream/main                                            # 競合時は fork 側を優先
+git push origin main                                               # fork へ反映
+# 自前修正は fork 上のブランチ → fork main へ merge(上流へは出さない)
 cd ..
-git add engine && git commit -m "chore(engine): submodule を <tag/commit> へ更新"
+git add engine && git commit -m "chore(engine): submodule を <commit> へ更新"
 ```
 
 ## 4. 移植手順
@@ -66,11 +70,13 @@ git add engine && git commit -m "chore(engine): submodule を <tag/commit> へ�
      FloatSodaApp.Post / WristAgent・bridge の現物がまだこっちにある)
    - `chrome-view-sample`(WGC 画面キャプチャ)
    - 競合想定なし(着手ファイルが別)だが、統合後に `dotnet build` + 全テストを実行
-2. **この統合が済んだら、フレームワーク側の新機能は上流 `sumx21t/FloatSoda` へ PR**
+2. **フレームワーク側の新機能は fork 上で管理し、上流へは PR を出さない**
    - 対象: `ControllerRayPointerSource` ほか Phase 1 の本体変更、`OverlayKeyboard`、
-     `FloatSodaApp.Post`、docs 更新
-   - WristAgent / ChromeView のサンプル・tools は**上流 PR に含めない**か、
-     含めるなら「サンプル」として最小限に留める(置き場所が本リポジトリに決定済みのため)
+     `FloatSodaApp.Post`、docs 更新はすべて fork main に取り込まれた状態で pin する
+   - 上流に新機能は要求しないため、fork と上流の差分は本プロジェクトの
+     エンジン依存削減(たとえば NuGet 化)が実現するまで保持し続ける
+   - WristAgent / ChromeView のサンプル・tools は本リポジトリが正とし、
+     fork 側には残さない(Phase C で削除)
 3. submodule登録:
    ```bash
    git submodule add https://github.com/t22m003/FloatSoda.git engine
@@ -98,9 +104,10 @@ git add engine && git commit -m "chore(engine): submodule を <tag/commit> へ�
    - ChromeView: 画面がオーバーレイに出る
    - WristAgent: 腕にカード・レーザー選択・OSK 入力・振動・ホットキー
    - 併用: ChromeView を見ながら腕で承認要求を返せるか
-10. 移植後は元 FloatSoda リポジトリの `samples/FloatSoda.Samples.WristAgent` と
-    `tools/WristAgentBridge` を削除し、「#182 実装」は上流 PR のみを残す方針で
-    FloatSoda 側をきれいにする(重複が残るとどちらが正か曖昧になる)
+10. 移植後は元 FloatSoda リポジトリ(fork)の `samples/FloatSoda.Samples.WristAgent` と
+    `tools/WristAgentBridge` を削除し、fork 側をきれいにする。アプリ部分は
+    本リポジトリが正となり、重複が残るとどちらが正か曖昧になるため
+    (上流 sumx21t/FloatSoda へは手を入れていないため影響なし)
 11. CI: `dotnet build` のみの軽い CI を追加(SteamVR 必須の実機テストは手動運用)
 
 ## 5. 注意点(移植で壊れやすい箇所)
