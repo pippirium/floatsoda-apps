@@ -17,7 +17,7 @@ namespace FloatSoda.Apps.ScreenView;
 /// <item>グリップ(左右どちらでも) — パネルを掴んで移動。握っている間、そのコントローラの移動差分がそのままパネルの平行移動になる</item>
 /// <item>右スティック上下(掴んでいないとき) — パネル幅を連続的に拡縮(高さはソース縦横比に自動追従)</item>
 /// <item>左 グリップ+スティック押し込み 長押し(0.7 秒) — パネルの表示/非表示(<c>--toggle</c> で変更可)</item>
-/// <item>右 グリップ+スティック押し込み 長押し(0.3 秒) — 対象切替(<c>--switch</c> で変更可)</item>
+/// <item>右 グリップ+スティック押し込み 長押し(0.3 秒) — キャプチャ対象を選ぶピッカーの開閉(<c>--switch</c> で変更可)</item>
 /// </list>
 /// <para>
 /// SteamVR の入力(SteamVR Input)を使わないため VRChat などへの入力横取りは発生しません
@@ -71,7 +71,7 @@ public sealed class OverlayManipulator : IDisposable
     private bool _handleMissingLogged;
     private bool _errorLogged;
 
-    /// <summary>対象切替要求(<c>--switch</c> 割当の長押し成立時)。</summary>
+    /// <summary>ピッカー開閉要求(<c>--switch</c> 割当の長押し成立時)。</summary>
     public event Action? TargetSwitchRequested;
 
     /// <summary>オーバーレイ パネルを操作可能にします。</summary>
@@ -81,11 +81,11 @@ public sealed class OverlayManipulator : IDisposable
         _overlayName = overlayTitle;
         _toggle = ParseToggleSpec(toggleSpec ?? "");
         _switch = ParseToggleSpec(switchSpec ?? "");
-        // 同一割当だと長押し成立時に両方発火してしまうため、切替側を無効化して告知する。
+        // 同一割当だと長押し成立時に両方発火してしまうため、ピッカー開閉側を無効化して告知する。
         if (_switch == _toggle)
         {
             _switchEnabled = false;
-            Console.Error.WriteLine("[OverlayManipulator] 対象切替(--switch)の割当がパネル表示切替(--toggle)と同一のため、対象切替を無効にします。");
+            Console.Error.WriteLine("[OverlayManipulator] ピッカー開閉(--switch)の割当がパネル表示切替(--toggle)と同一のため、ピッカー開閉を無効にします。");
         }
         // キーは src/FloatSoda/Core/WindowKeyGenerator.cs と同じ規則(エントリアセンブリ名 + タイトルのスネークケース)。
         // 側の仕様が変わったときはこのコピーが先行して外れる点に注意。
@@ -194,7 +194,7 @@ public sealed class OverlayManipulator : IDisposable
             }
         }
 
-        // ---- 長押し割当: パネル表示/非表示(--toggle)、対象切替(--switch) ----
+        // ---- 長押し割当: パネル表示/非表示(--toggle)、ピッカー開閉(--switch) ----
         ApplyHoldBinding(_toggle, left, right, dt, ref _toggleHold, ref _toggleFired, TogglePanelVisible);
         if (_switchEnabled)
         {
@@ -237,7 +237,7 @@ public sealed class OverlayManipulator : IDisposable
         fire();
     }
 
-    /// <summary>対象切替(--switch)の割当が成立したときの処理。軽く振動して対象切替を要求します。</summary>
+    /// <summary>ピッカー開閉(--switch)の割当が成立したときの処理。軽く振動して開閉を要求します。</summary>
     private void RequestTargetSwitch()
     {
         var hapticDevice = TrackedDevice.RightController.ResolveIndex();

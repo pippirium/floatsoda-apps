@@ -71,8 +71,8 @@
 
 - 候補を **プロセス名でグループ化**(アルファベット順)。グループヘッダー行:
   `プロセス名 (N 窗)`
-- 1 ページ **7 件**(グループヘッダーも含めて 8 行構成)。下部に `[◀] 2/5 [▶]`。
-  ボタンはすべて `GestureDetector`
+- 1 ページ **8 行**(グループヘッダーと仕切りは行の予算に数えない。実測で確定した値)。
+  下部に `[◀] 2/5 [▶]` と `[再読込]`。ボタンはすべて `GestureDetector`
   — movable 窓なら左トリガー、ダッシュボード窓なら SteamVR レーザーで押せる
 - 各行: `タイトル(中点省略) ` + 現在キャプチャ中の対象には `●` マーク
 - 行タップ → `WindowCaptureSession.SwitchTarget(hwnd)` → シートを閉じる
@@ -92,13 +92,39 @@
 
 ## 3. 実装手順(Phase 2)
 
-| # | ファイル | 作るもの |
-|---|---|---|
-| 1 | `WindowTargets.cs`(新) | 候補列挙 + 除外ルールの共有化(`EnumerateCandidates()`) |
-| 2 | `WindowPickerPanel.cs`(新) | シート本体。`StatefulWidget`: ページャー・グループ化・現在対象マーク・タップ→切替・閉じるコールバック |
-| 3 | `ScreenViewWidget.cs` | 上部ヘッダーバーの追加(対象名 + [一覧]) とピッカー開閉状態の管理。フレーム供給部は触らない |
-| 4 | `Program.cs` | `TargetSwitchRequested` の処理を「巡回」から「ピッカー開閉要求」に差し替え(State へ `FloatSodaApp.Post` で通知)。usage コメントの更新 |
-| 5 | `OverlayManipulator.cs` | ロジック変更なし(イベント名は `TargetSwitchRequested` のまま、意味の doc を更新) |
+| # | ファイル | 作るもの | 状態 |
+|---|---|---|---|
+| 1 | `WindowTargets.cs`(新) | 候補列挙 + 除外ルールの共有化(`EnumerateCandidates()`) | 実装済み |
+| 2 | `WindowPickerPanel.cs`(新) | シート本体。`StatefulWidget`: ページャー・グループ化・現在対象マーク・タップ→切替・閉じるコールバック | 実装済み |
+| 3 | `ScreenViewWidget.cs` | 上部ヘッダーバーの追加(対象名 + [一覧]) とピッカー開閉状態の管理。フレーム供給部は触らない | 実装済み |
+| 4 | `Program.cs` | `TargetSwitchRequested` の処理を「巡回」から「ピッカー開閉要求」に差し替え(State へ `FloatSodaApp.Post` で通知)。usage コメントの更新 | 実装済み |
+| 5 | `OverlayManipulator.cs` | ロジック変更なし(イベント名は `TargetSwitchRequested` のまま、意味の doc を更新) | doc のみ更新済み |
+
+### 実装で確定したレイアウトの制約(engine の挙動を実測して確定)
+
+`WindowWidget.Size` を指定しない窓(`DesktopWindow` / `DashboardWindow`)では
+`RenderView` が子へ `BoxConstraints.Unbounded` を渡すため、寸法はツリー側で宣言する必要がある。
+
+- オーバーレイ本体(`ScreenViewWidget.Build`)とピッカーシート(`WindowPickerPanel.Build`)の
+  両方で `OverflowBox { MinWidth = MaxWidth = …, MinHeight = MaxHeight = …, Fit = OverflowBoxFit.DeferToChild }`
+  を使い、宣言した寸法をそのまま採用させる(内側へ渡す制約も宣言値に置き換わる)
+- `Container`/`ConstrainedBox`/`SizedBox` + `ColoredBox` は背景が受け取った制約の上限まで
+  広がる(engine の `RenderProxyBox` は制約をそのまま通し、`RenderPadding` は上限まで膨らむ)ため、
+  シート地は `OverflowBox` の内側すぐの `ColoredBox` に塗る
+- `SizedBox`(`RenderConstrainedBox`)は子の寸法をそのまま採用するので、内側の箱では寸法を
+  宣言できない。見出し・行・仕切り・ページ制御はそれぞれ `Width`/`Height` を宣言して揃える
+- flex 子を持つ `RenderFlex` は主軸の最大が無限だと例外を投げるため、`Stack` の `Positioned` は
+  `Top`+`Bottom`(または `Height`)を必ず揃える
+- `ListView` / `Scrollable` は未公開(`SingleChildScrollView` は internal)なので改ページ方式を維持
+- 寸法は `WidgetBitmapRenderer` を使ったヘッドレス描画 + ピクセルサンプリングで実測して検証した
+  (`--desktop` は OpenVR の初期化が窓の種別より先に来て HMD 無しでは起動できないため)
+
+### Phase 1 で Phase 2 の設計から変更した点
+
+- 1 ページ **8 行**。グループ名と仕切りは行の予算に数えない(設計案の「グループヘッダーも含め 8 行」だと、
+  候補 8 件が 1 ページに収まらなかった)
+- 編集中の窓が入ったページを `Build` のたびに追跡し、候補の差し替えでそのページへ寄せる
+- シートはヘッダーバーの下からオーバーレイ下端までを覆う(切替直後の空白フレームを隠す)
 
 落とし込み方針(実装方針):
 
