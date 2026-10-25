@@ -8,15 +8,24 @@ ChromeView(Chrome / デスクトップ画面の VR オーバーレイ共有)と 
 
 | レイヤ | 場所 | 変更の流れ |
 |---|---|---|
-| フレームワーク(エンジン部分) | fork `t22m003/FloatSoda`(submodule で pin) | **fork で branch を切って作業 → fork main へ merge → 本リポジトリは submodule の pin 更新で取り込む** |
+| フレームワーク(エンジン部分) | fork `t22m003/FloatSoda`(submodule で pin) | **fork で branch を切って作業 → fork main へ merge(必要なら fork 内 PR)→ 本リポジトリは submodule の pin 更新で取り込む** |
 | アプリ機能部分 | 本リポジトリ(WristAgent / ChromeView / bridge tool) | ここで自由に開発。必要なエンジン変更は fork 側で作り、その結果を submodule で消費する |
+
+**前提(位置づけ)**: fork は **上流に取り込まれる想定のない、個人用カスタマイズ領域** です。
 
 **禁止事項(運用中に絶対に行わない)**:
 
-- 上流 `sumx21t/FloatSoda` への **PR / Issue / あらゆる変更依頼**。
-  fork 上で branch を切ったものを **fork main へ直接 merge して push** する運用だけ
-  使う(merge は PR 経由にせずローカル merge)。PR でも通知機会が発生するため、
-  「fork のコミット/マージは行うが、上流に飛ぶ通知を生む操作はゼロ」が原則。
+- 上流 `sumx21t/FloatSoda` に対する **PR / Issue / あらゆる変更依頼**。
+  (上流リポジトリの URL 空間を対象にした送信操作は一切しない)
+
+**許可される操作(すべて fork 内でのみ)**:
+
+- fork 内で branch を切り、**fork の main を base にした PR → merge** も自由に可
+  (base が fork main である限り GitHub は上流へ何も通知しない)
+- ローカル merge + push も可。好みで選んでよい
+- 上流の新しいコミットを取り込むのも、fork main への merge / fork 内 PR 何れでも可
+
+⇔ 境界は「**上流向け送信はゼロ、fork 内は全自由**」の1本だけ。
 
 ## 2. 全体構成(目標形)
 
@@ -59,10 +68,12 @@ fork から想定外の範囲を持ってくるとしても、PR が飛ぶ要素
 # 1) fork で branch を切ってエンジン変更を作る
 cd engine           # submodule 内は fork の checkout
 git checkout -b <slug>
-# ...実装 + tests + docs 更新(t22m003 側のコミット規約に従い、コミットメッセージは日本語)...
+# ...実装 + tests + docs 更新(floatsoda リポジトリのコミット規約に従い、メッセージは日本語)...
 git add -A && git commit
 
-# 2) fork main へ merge(PR は作らない。ローカル merge + push のみ)
+# 2) fork main へ merge。fork 内 PR(base=main)経由でも、ローカル merge でもよい
+#    - PR を使う場合: github 上で t22m003/FloatSoda の main を base に PR → merge
+#      (本リポジトリから gh pr create --base main --head <slug> でも可)
 git checkout main
 git merge --no-ff <slug>          # 競合時は自分で解消
 git push origin main              # fork 上の main を更新(上流に通知は来ない)
@@ -91,12 +102,14 @@ pin 更新を本リポジトリでコミットする(忘れると本リポジト
 
 ### Phase A — fork main の整備
 
-1. fork(`t22m003/FloatSoda`)の `main` に、実装済みブランチを merge する(PR 不使用)
+1. fork(`t22m003/FloatSoda`)の `main` に、実装済みブランチを merge する
+   (fork 内 PR での merge でもローカル merge でも可)
    - `182-device-tracked-pointer`(ControllerRayPointerSource / OverlayWindow 一般化 /
      OverlayKeyboard / FloatSodaApp.Post / docs 更新 + WristAgent サンプル・bridge tool)
    - `chrome-view-sample`(WGC 画面キャプチャ)
    - 競合想定なし(着手ファイルが別)だが、merge 後に `dotnet build` + 全テストを実行
    - 先に fork main に `upstream` リモートを設定し、main を上流 HEAD まで上げておく
+     (merge は fork 内で完結。fork 内 PR にしてもよい)
    - merge は `git merge --no-ff` とし、merge commit を残す(後から差分の由来が復元できる)
 2. merge 結果を fork に push する(上流へは何も送らない)
 3. submodule 登録:
@@ -146,8 +159,9 @@ pin 更新を本リポジトリでコミットする(忘れると本リポジト
 - `Dpm` / `AppKey` 等の初期化値はそれぞれのサンプルの現在値を踏襲。
 - docs(Input.md など)は engine 側(fork の FloatSoda)に属する。本リポジトリには
   アプリ固有の README・エンドユーザー向け接続手順のみ置く。
-- submodule 内での作業は **commit / merge / push すべて許可**(fork 内の完結領域)。
-  ただし **PR / Issue / patch-series で上流らしきリモートへ投げる操作はしない**。
+- submodule 内での作業は **commit / merge / push / fork 内 PR すべて許可**
+  (fork は個人用カスタマイズ領域)。ただし **上流リポジトリへの PR / Issue /
+  push など上流対象の送信操作はしない**。
 
 ## 6. 引き継ぎ事項(移植中も閉じない)
 
