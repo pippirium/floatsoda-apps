@@ -8,14 +8,15 @@ ChromeView(Chrome / デスクトップ画面の VR オーバーレイ共有)と 
 
 | レイヤ | 場所 | 変更の流れ |
 |---|---|---|
-| フレームワーク(エンジン部分) | 本リポジトリ内の `engine/`(git submodule)→ **上流 `sumx21t/FloatSoda` を直接 pin** | submodule チェックアウト後に本リポジトリ持添の `patches/` を適用して、必要なエンジン変更を本リポジトリ内で完結させる |
-| アプリ機能部分 | 本リポジトリ(WristAgent / ChromeView / bridge tool) | ここで自由に開発 |
+| フレームワーク(エンジン部分) | fork `t22m003/FloatSoda`(submodule で pin) | **fork で branch を切って作業 → fork main へ merge → 本リポジトリは submodule の pin 更新で取り込む** |
+| アプリ機能部分 | 本リポジトリ(WristAgent / ChromeView / bridge tool) | ここで自由に開発。必要なエンジン変更は fork 側で作り、その結果を submodule で消費する |
 
-**重要**: 上流・fork への PR / push は一切行わない。fork を使わない(submodule は
-上流 URL を直接指す)。これにより fork 上に PR が紛れても上流に通知が飛ぶ
-トラブル自体が構造的に発生しない。エンジンの自前変更はすべて
-`patches/` の差分ファイルとして本リポジトリだけに持ち、submodule の
-ワーキングツリーに適用する(submodule 内ではコミットしない)。
+**禁止事項(運用中に絶対に行わない)**:
+
+- 上流 `sumx21t/FloatSoda` への **PR / Issue / あらゆる変更依頼**。
+  fork 上で branch を切ったものを **fork main へ直接 merge して push** する運用だけ
+  使う(merge は PR 経由にせずローカル merge)。PR でも通知機会が発生するため、
+  「fork のコミット/マージは行うが、上流に飛ぶ通知を生む操作はゼロ」が原則。
 
 ## 2. 全体構成(目標形)
 
@@ -24,13 +25,8 @@ floatsoda-apps/
 ├── PLAN.md                    ← 本書
 ├── README.md                  ← アプリ全体の説明・起動方法・エージェント接続手順
 ├── .gitignore                 ← .NET 標準(floatsoda リポジトリから流用)
-├── engine/                    ← git submodule → sumx21t/FloatSoda(upstream を直接 pin)
-├── patches/                   ← エンジンへの自前差分(git format-patch 出力)
-│   ├── 0001-...-controller-ray-pointer-source.patch   (#182 本体 + OverlayWindow 一般化 + テスト + docs)
-│   ├── 0002-...-overlay-keyboard.patch                (OSK ラッパー)
-│   └── 0003-...-floatsoda-app-public-post.patch       (FloatSodaApp.Post)
-├── scripts/
-│   └── setup.ps1              ← submodule checkout + patch 適用(初回/上流更新のたび)
+├── engine/                    ← git submodule → fork(t22m003/FloatSoda main を pin)
+│   └── (upstream 全体: src/ tests/ docs/ samples/)
 ├── apps/
 │   ├── WristAgent/            ← FloatSoda.Samples.WristAgent から移植
 │   └── ChromeView/            ← FloatSoda.Samples.ChromeView から移植
@@ -39,71 +35,88 @@ floatsoda-apps/
     └── WristAgentBridge/      ← hooks 中継 + stdio MCP サーバー
 ```
 
+- `engine/` は fork リポジトリ全体をサブモジュール化する(src/ だけの部分木分割は
+  `git subtree split` の維持コストが高いため)。tests/ や docs/ も入るが無害。
 - `apps/` と `tools/` はソリューション(仮称 `FloatSoda.Apps.slnx`)に登録し、
   `csproj` の `ProjectReference` は `../../engine/src/FloatSoda/...` を指す。
-- patch 適用は working tree への変更として行い、**submodule HEAD は常に上流 pin**。
-  submodule が dirty に見える問題は `.gitmodules` に `ignore = dirty` を入れて無視
+
+さらに、アプリ側からこの submodule はビルドに必要なだけを消費する
+(src/FloatSoda / .Engine / .OVR / .Rendering / .Abstractions + tests)。
+fork から想定外の範囲を持ってくるとしても、PR が飛ぶ要素は存在しない
 
 ## 3. エンジン取り込み方式の決定
 
 | 方式 | 上流取り込み | IDE/ビルド | 採否 |
 |---|---|---|---|
-| **submodule + patch 系列**(採用) | `git -C engine fetch upstream` → pin 更新 → patch の再適用を確認 | 正常動作。Rider は submodule も1窓で見える | ✅ 上流への送信が一枚も発生しない |
-| fork main に差分を持たせ pin | fork push(+ 間接的な上流通知リスク) | 同 | ❌ PR/通知を避けたい |
+| **submodule → fork main**(採用) | fork 上の branch merge でエンジン更新を作り、pin 更新 | 正常動作。Rider は submodule も1窓で見える | ✅ fork 内で完結。上流への送信ゼロ |
+| submodule + patch 系列 | 上流 pin + 本リポジトリ内 patch | 同 | ❌ patch 運用の手間が継続する。捨てた |
 | subtree | `git subtree pull --squash` で全量マージ、競合抵抗が継続 | 同 | ❌(ノイズ大) |
 | NuGet パッケージ参照 | バージョン更新のみ。**未リリースのエンジン修正(ControllerRayPointerSource など)が使えない** | 同 | ❌(現段階) |
 
-### submodule + patch の運用
+### エンジン側の運用(更新のたび)
 
-```powershell
-# 初回と上流更新のたび(scripts/setup.ps1 の中身)
-git submodule update --init --checkout engine
-git -C engine apply --3way --whitespace=nowarn patches/*.patch
+```bash
+# 1) fork で branch を切ってエンジン変更を作る
+cd engine           # submodule 内は fork の checkout
+git checkout -b <slug>
+# ...実装 + tests + docs 更新(t22m003 側のコミット規約に従い、コミットメッセージは日本語)...
+git add -A && git commit
+
+# 2) fork main へ merge(PR は作らない。ローカル merge + push のみ)
+git checkout main
+git merge --no-ff <slug>          # 競合時は自分で解消
+git push origin main              # fork 上の main を更新(上流に通知は来ない)
+
+# 3) 本リポジトリで pin を更新
+cd ../..
+git add engine && git commit -m "chore(engine): submodule を <commit> へ更新"
 ```
 
-submodule HEAD を新たな上流コミットへ上げた後は patch が当たらない可能性がある。
-その場合の手順:
+上流の新しいコミットを取り込む場合も fork main 上で直接 merge する
+(同じく上流への送信は発生しない):
 
-1. **patch の再生** — engine worktree 内で一時 branch を作り、旧 pin に旧 patch を
-   `git am` で commit 形にして、新 pin へ `git rebase`。その後
-   `git format-patch` で差分を書き戻し、本リポジトリの `patches/` を差し替える
-2. ビルド + 全テスト(`tests/FloatSoda.Test`, `tests/FloatSoda.Rendering.Test`)を実行してから
-   pin を `git add engine` でコミット
+```bash
+cd engine
+git remote add upstream https://github.com/sumx21t/FloatSoda.git   # 初回のみ
+git checkout main && git fetch upstream
+git merge upstream/main      # 競合時は fork 側(自前差分)を優先して解消
+git push origin main
+```
 
-patch の送信元は一貫しており、本リポジトリのコミット履歴にある差分だけが
-エンジンへの情報源。上流リポジトリ側に何もないので、上流がどう進んでいても
-本リポジトリのビルドは壊れない。
+**注意**: submodule 内で merge/push を行うと、submodule HEAD が先に進み、
+本リポジトリ側の pin が古くなる。エンジン更新が完了したら必ずステップ 3) の
+pin 更新を本リポジトリでコミットする(忘れると本リポジトリのビルドが旧寸法のまま)
 
 ## 4. 移植手順
 
-### Phase A — patch 系列の生成と engine 取り込み
+### Phase A — fork main の整備
 
-1. 既存 FloatSoda ワーキングコピー(ローカル)から、エンジン宛の差分を取り出す。
-   基点は**上流 main の現在 HEAD**(ChromeView のベースになっているコミット)
+1. fork(`t22m003/FloatSoda`)の `main` に、実装済みブランチを merge する(PR 不使用)
+   - `182-device-tracked-pointer`(ControllerRayPointerSource / OverlayWindow 一般化 /
+     OverlayKeyboard / FloatSodaApp.Post / docs 更新 + WristAgent サンプル・bridge tool)
+   - `chrome-view-sample`(WGC 画面キャプチャ)
+   - 競合想定なし(着手ファイルが別)だが、merge 後に `dotnet build` + 全テストを実行
+   - 先に fork main に `upstream` リモートを設定し、main を上流 HEAD まで上げておく
+   - merge は `git merge --no-ff` とし、merge commit を残す(後から差分の由来が復元できる)
+2. merge 結果を fork に push する(上流へは何も送らない)
+3. submodule 登録:
    ```bash
-   # 182-device-tracked-pointer ブランチ側から
-   git format-patch <upstream-main-HEAD>..HEAD -- src tests docs FloatSoda.slnx
+   git submodule add https://github.com/t22m003/FloatSoda.git engine
+   cd engine && git checkout <merge済みの main HEAD> && cd ..
+   git commit -m "chore(engine): FloatSoda(fork) を pin"
    ```
-   - `samples/` と `tools/` は**patch 対象外**(本リポジトリへはコピペで移すため)
-   - 生成した patch は本リポジトリの `patches/` へ
-2. 本リポジトリに `.gitignore`, `scripts/setup.ps1`, `.gitmodules`(submodule 登録)を用意
-   ```bash
-   git submodule add https://github.com/sumx21t/FloatSoda.git engine
-   # pin は上流 main HEAD。docs/ tests/ も入るが無害
-   ```
-3. `scripts/setup.ps1` を実行し、patch がきれいに当たること & `dotnet build` +
-   テストが通ることを確認 → pin と patch、scripts をコミット
 
 ### Phase B — アプリ部分の移植
 
 4. `apps/WristAgent/`:
-   - `samples/FloatSoda.Samples.WristAgent/` から csproj・ソース一式をコピー
+   - `engine/samples/FloatSoda.Samples.WristAgent/` から csproj・ソース一式をコピー
    - **まずはコード改変なし**で動かす(移植差異を最小化するため)。動作確認後に改名を検討
    - ProjectReference を `../../engine/src/FloatSoda/FloatSoda.csproj` へ修正
    - slnx 登録
 5. `apps/ChromeView/`:
-   - `samples/FloatSoda.Samples.ChromeView/`(Program.cs + `OverlayManipulator.cs`)を移植
-   - エンジン変更が要る箇所が見つかれば、その差分を `patches/` に追加する
+   - `engine/samples/FloatSoda.Samples.ChromeView/`(Program.cs + `OverlayManipulator.cs`)を移植
+   - エンジン変更が要ることが判明したら、**fork 側で branch → commit → main merge** し、
+     pin をあげてから使い続ける
    - こちらも基本的にコード改変なし
 6. `tools/WristAgentBridge/`: そのままコピー(外部依存なし)
 7. README・README 内のパス・設定例(`dotnet run --project ...` のパス)を新構成へ書き換え
@@ -115,8 +128,10 @@ patch の送信元は一貫しており、本リポジトリのコミット履�
    - ChromeView: 画面がオーバーレイに出る
    - WristAgent: 腕にカード・レーザー選択・OSK 入力・振動・ホットキー
    - 併用: ChromeView を見ながら腕で承認要求を返せるか
-10. 元 FloatSoda リポジトリ(ローカル)側のブランチは残してよい(patch の安全性担保と
-    履歴参照用)。以後の開発は本リポジトリ側が正。fork / 上流には何も送らない
+10. 移植後、fork 側の `samples/FloatSoda.Samples.WristAgent` と
+    `tools/WristAgentBridge` を(fork 上のブランチでの削除コミット + main merge で)
+    削除して、アプリ部分は本リポジトリが正とする(重複が残るとどちらが正か曖昧になる)。
+    フレームワーク変更は fork 上に残し続ける
 11. CI: `dotnet build` のみの軽い CI を追加(SteamVR 必須の実機テストは手動運用)
 
 ## 5. 注意点(移植で壊れやすい箇所)
@@ -129,12 +144,10 @@ patch の送信元は一貫しており、本リポジトリのコミット履�
 - **namespace と物理ディレクトリの一致**が本リポジトリの規約にもなるので、
   改名するなら namespace もセットで(Rider の semantic rename 推奨)。
 - `Dpm` / `AppKey` 等の初期化値はそれぞれのサンプルの現在値を踏襲。
-- docs(Input.md など)は engine 側に属するが、patch 時の年次的な考え方として
-  「上流に伝えたい事実」は本リポジトリのドキュメントでも記述しておく
-  (上流へは PR を出さないため、上流への乖離のファクトは本リポジトリ内に記録)。
-- patch は engine/submodule HEAD 上の差分を前提としているため、
-  **patch 適用前の engine は「まっさらな上流 pin」であることを崩さないこと**
-  (patch 済み engine に対して再適用を試みると失敗する。setup.ps1 は `--check` 付き)。
+- docs(Input.md など)は engine 側(fork の FloatSoda)に属する。本リポジトリには
+  アプリ固有の README・エンドユーザー向け接続手順のみ置く。
+- submodule 内での作業は **commit / merge / push すべて許可**(fork 内の完結領域)。
+  ただし **PR / Issue / patch-series で上流らしきリモートへ投げる操作はしない**。
 
 ## 6. 引き継ぎ事項(移植中も閉じない)
 
@@ -144,6 +157,6 @@ patch の送信元は一貫しており、本リポジトリのコミット履�
 - hooks 運用は変更のたびに `/hooks` の trust review が必要
 - OSK は SteamVR 全体で同時 1 セッション(`KeyboardAlreadyInUse` 時は TryOpen が false)
 - bridge の `serve-mcp` は Codex/Claude Code の `mcp_servers` 登録が必要
-- 上流に伝えたいエンジン変更(ControllerRayPointerSource / OverlayKeyboard /
-  floatSodaApp.Post)は `patches/` が一次情報。将来方針が変わったときは
-  patch 内容をそのまま PR 化できるよう、commit メッセージの粒度を保つ
+- fork 上に残すエンジン変更(`ControllerRayPointerSource` / `OverlayKeyboard` /
+  `FloatSodaApp.Post` / `OverlayWindow` 一般化)は、将来のエンジン依存整理
+  (たとえば NuGet 化)が済むまで fork main の常駐差分として維持する
