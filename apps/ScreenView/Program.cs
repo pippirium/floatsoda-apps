@@ -10,7 +10,7 @@ using SkiaSharp;
 // 自分のHMD上で任意のウィンドウの画面を見るアプリ。
 // Windows Graphics Capture でアプリ単位の画面を取り込み、FloatSoda の
 // RenderImage でリアルタイムに表示します。キャプチャ対象はオーバーレイ上の
-// ピッカー(上部の [一覧])から選べます。
+// ピッカー(上部の [一覧])から選べます。起動時の既定は前面のウィンドウです。
 //
 // 使い方:
 //   --desktop            SteamVRの代わりにデスクトップウィンドウで表示(HMDが不要な目視確認用)
@@ -19,9 +19,10 @@ using SkiaSharp;
 //   --pos "x,y,z"        --world 時の初期配置座標(プレイエリア中央原点。既定は 0,1,-1)
 //   --yaw <度>           --world 時の初期水平回転(度)。既定は 0(正面を向く)
 //   --list-windows       候補ウィンドウの一覧を出して終了する
-//   --window <タイトル>   キャプチャするウィンドウをタイトル部分一致で指定(既定はchromeの先頭)
+//   --window <タイトル>   キャプチャするウィンドウをタイトル部分一致で指定
 //   --pid <数値>          キャプチャするウィンドウをプロセスIDで指定
-//   --process <名前>      対象プロセス名(既定は chrome)
+//   --process <名前>      対象プロセス名で指定
+//                         上のいずれも指定しない既定は、起動時に前面のウィンドウを対象にする
 //   --fps <数値>          表示更新の上限(既定は 30)
 //   --toggle <割当>       パネル表示/非表示の割当(形式: <手>:<ボタン>[+grip][@<ms>])
 //                         手=L|R, ボタン=stick|a|trigger|menu|grip。既定は L:stick+grip@700
@@ -67,7 +68,8 @@ string GetOptionValueAfter(string name) =>
     Array.IndexOf(args, name) is var i && i >= 0 && i + 1 < args.Length ? args[i + 1] : string.Empty;
 
 var titleFilter = args.Contains("--window") ? GetOptionValueAfter("--window") : null;
-var processFilter = args.Contains("--process") ? GetOptionValueAfter("--process") : "chrome";
+// 対象指定の引数がひとつも無い既定は「前面のウィンドウ」を選ぶ(既定プロセスを固定しない)。
+var processFilter = args.Contains("--process") ? GetOptionValueAfter("--process") : null;
 var pidFilter = uint.TryParse(GetOptionValueAfter("--pid"), out var parsedPid) ? parsedPid : 0u;
 var fpsLimit = int.TryParse(GetOptionValueAfter("--fps"), out var parsedFps) && parsedFps > 0 ? parsedFps : 30;
 // パネルの表示/非表示はコントローラ割当。既定は L:stick+grip@700(VRChat の操作と被りにくい組合せ)。
@@ -75,20 +77,30 @@ var toggleSpec = args.Contains("--toggle") ? GetOptionValueAfter("--toggle") : "
 var switchSpec = args.Contains("--switch") ? GetOptionValueAfter("--switch") : "R:stick+grip@300";
 
 var allWindows = WindowLocator.EnumerateVisibleWindows();
+// 前面ウィンドウが候補に居るか、候補そのものを選ぶための列挙(除外ルールを適用済み)。
+var candidates = WindowTargets.EnumerateCandidates();
+// 起動時に選ぶ対象。条件指定があればそれを優先し、指定なしなら前面のウィンドウ。
+// 条件指定で見つからなかったときは前面へ退避しない(打ち間違いを静かに隠さない)。
+var hasFilter = titleFilter is not null || processFilter is not null || pidFilter != 0;
+var target = (hasFilter
+        ? WindowLocator.Pick(allWindows, titleFilter, processFilter, pidFilter)
+        : WindowTargets.PickForeground(candidates))
+    ?? throw new InvalidOperationException(
+        hasFilter
+            ? "指定した条件に合うウィンドウが見つかりませんでした。ウィンドウやプロセスは、--list-windows で一覧できます。"
+            : "キャプチャ対象のウィンドウが見つかりませんでした。ウィンドウやプロセスは、--list-windows で一覧できます。");
+Console.WriteLine($"キャプチャ対象: PID={target.ProcessId} HWND=0x{target.Handle:X} [{target.ProcessName}] {target.Title}");
 
 if (listIndex >= 0)
 {
     foreach (var w in allWindows)
     {
-        var marker = w.ProcessName.Equals(processFilter, StringComparison.OrdinalIgnoreCase) ? " * " : "   ";
+        // * は「起動時に選ぶ対象」に出す(引数なしなら前面の窓、条件指定ならその条件の窓)。
+        var marker = w.Handle == target.Handle ? " * " : "   ";
         Console.WriteLine($"{marker}PID={w.ProcessId,8} HWND=0x{w.Handle:X} [{w.ProcessName}] {w.Title}");
     }
     return 0;
 }
-
-var target = WindowLocator.Pick(allWindows, titleFilter, processFilter, pidFilter) ?? throw new InvalidOperationException(
-    $"キャプチャ対象のウィンドウが見つかりませんでした。ウィンドウやプロセスは、--list-windows で一覧できます。");
-Console.WriteLine($"キャプチャ対象: PID={target.ProcessId} HWND=0x{target.Handle:X} [{target.ProcessName}] {target.Title}");
 
 if (saveIndex >= 0)
 {

@@ -21,15 +21,33 @@ public static class WindowTargets
     /// <summary>自分自身のオーバーレイ ウィンドウを候補に入れないためのプロセスID。</summary>
     private static readonly uint SelfProcessId = (uint)Environment.ProcessId;
 
+    /// <summary>除外対象かどうか。候補の列挙と前面ウィンドウの選択で同じ規則を使う。</summary>
+    public static bool IsExcluded(WindowInfo window)
+        => window.ProcessId == SelfProcessId || ExcludedProcessNames.Contains(window.ProcessName, StringComparer.OrdinalIgnoreCase);
+
     /// <summary>除外を適用した候補ウィンドウを列挙します。</summary>
     /// <remarks>呼び出し元のスレッドから Win32 を直接呼ぶ。バックグラウンド スレッドから呼ぶこと。</remarks>
     public static IReadOnlyList<WindowInfo> EnumerateCandidates()
     {
         return WindowLocator
             .EnumerateVisibleWindows()
-            .Where(w => w.ProcessId != SelfProcessId)
-            .Where(w => !ExcludedProcessNames.Contains(w.ProcessName, StringComparer.OrdinalIgnoreCase))
+            .Where(w => !IsExcluded(w))
             .ToList();
+    }
+
+    /// <summary>
+    /// 起動時の初期対象として「前面のウィンドウ」を選ぶ。
+    /// </summary>
+    /// <remarks>
+    /// 前面の窓が候補に居ない(除外対象のシェル由来、またはタイトルを持たない窓)ときは
+    /// <paramref name="candidates"/> の先頭へ退避する。どちらも無ければ null。
+    /// <paramref name="candidates"/> は除外を適用済みの候補列挙の結果を渡すこと。
+    /// </remarks>
+    public static WindowInfo? PickForeground(IReadOnlyList<WindowInfo> candidates)
+    {
+        // 前面の窓が除外対象(シェル由来など)なら、そこから選び直さず候補の先頭へ退避する。
+        return WindowLocator.Find(candidates, WindowLocator.GetForegroundHandle())
+            ?? (candidates.Count == 0 ? null : candidates[0]);
     }
 
     /// <summary>候補をプロセス名(アルファベット順)→ タイトル順のグループへまとめる。</summary>

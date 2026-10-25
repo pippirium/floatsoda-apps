@@ -17,3 +17,4 @@ GetWindowTextW
 GetWindowTextLengthW
 IsWindowVisible
 GetWindowThreadProcessId
+GetForegroundWindow

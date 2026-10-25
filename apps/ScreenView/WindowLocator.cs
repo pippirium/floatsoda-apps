@@ -56,18 +56,49 @@ public static class WindowLocator
     }
 
     /// <summary>条件に合うキャプチャ対象を選びます。</summary>
-    /// <param name="titleContains">タイトルの部分一致。null ならプロセス名のみで判定します。</param>
-    /// <param name="processName">対象のプロセス名(例: "chrome")。</param>
+    /// <param name="titleContains">タイトルの部分一致。null は指定なし(条件に加えない)。</param>
+    /// <param name="processName">プロセス名(例: "chrome")。null は指定なし(条件に加えない)。</param>
     /// <param name="pid">指定した場合、該当 PID を優先します。0 は省略。</param>
-    public static WindowInfo? Pick(IReadOnlyList<WindowInfo> windows, string? titleContains, string processName, uint pid = 0)
+    /// <remarks>
+    /// 条件をひとつも渡さないと呼び出し側が意図せず全候補の先頭を返してしまうので、
+    /// 例外にします(指定なしの選択は <see cref="WindowTargets.PickForeground"/> が前面の
+    /// ウィンドウで行うため、通常はここへは来ません)。
+    /// </remarks>
+    /// <exception cref="ArgumentException">条件がひとつも指定されていない。</exception>
+    public static WindowInfo? Pick(IReadOnlyList<WindowInfo> windows, string? titleContains, string? processName, uint pid = 0)
     {
+        if (titleContains is null && processName is null && pid == 0)
+        {
+            throw new ArgumentException("titleContains / processName / pid の少なくともひとつを指定してください。", nameof(titleContains));
+        }
+
         var candidates = windows
-            .Where(w => w.ProcessName.Equals(processName, StringComparison.OrdinalIgnoreCase))
+            .Where(w => processName is null || w.ProcessName.Equals(processName, StringComparison.OrdinalIgnoreCase))
             .Where(w => titleContains is null || w.Title.Contains(titleContains, StringComparison.OrdinalIgnoreCase))
             .Where(w => pid == 0 || w.ProcessId == pid)
             .ToList();
 
         return candidates.Count == 0 ? null : candidates[0];
+    }
+
+    /// <summary>今前面にある(入力を受け付ける)トップレベル ウィンドウのハンドル。</summary>
+    /// <remarks>
+    /// 起動時の初期対象を「前面のウィンドウ」に使う。GetForegroundWindow は他のプロセスの
+    /// ウィンドウを返すため、そのハンドルが <see cref="EnumerateVisibleWindows"/> の候補に
+    /// 居るかは <see cref="Find"/> で突き合わせてください(タイトルを持たない窓などが混ざります)。
+    /// </remarks>
+    public static nint GetForegroundHandle() => PInvoke.GetForegroundWindow();
+
+    /// <summary>ハンドルが候補に居るときだけその候補を返す。</summary>
+    public static WindowInfo? Find(IReadOnlyList<WindowInfo> windows, nint handle)
+    {
+        if (handle == 0) return null;
+        foreach (var window in windows)
+        {
+            if (window.Handle == handle) return window;
+        }
+
+        return null;
     }
 
     private static string GetWindowText(nint hwnd)
