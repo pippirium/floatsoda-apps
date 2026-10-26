@@ -310,9 +310,11 @@ public record ScreenViewWidget : StatefulWidget<ScreenViewWidget>
         {
             // 候補の列挙前(シート未操作時)でもヘッダーに対象名を出せるよう、
             // ショートカットの列挙はしない:分かっている名前だけ使い、分からなければアプリ名を出す。
-            WindowInfo? known = _candidates.FirstOrDefault(w => w.Handle == _currentHandle);
-            var label = known is { } k
-                ? $"{k.ProcessName} — {WindowTargets.ElideMiddle(k.Title, HeaderTitleMaxLength)}"
+            // WindowInfo は構造体のため、FirstOrDefault の該当なしは default(Handle=0, Title=null)。
+            // WindowInfo? に入れても null にならず `is { }` を通ってしまうので、HWND を鍵に確かめる。
+            var knownMatch = _candidates.FirstOrDefault(w => w.Handle == _currentHandle);
+            var label = knownMatch.Handle != 0
+                ? $"{knownMatch.ProcessName} — {WindowTargets.ElideMiddle(knownMatch.Title, HeaderTitleMaxLength)}"
                 : "Screen View";
 
             return new GestureDetector
