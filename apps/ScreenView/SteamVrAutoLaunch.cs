@@ -21,7 +21,7 @@ internal static class SteamVrAutoLaunch
     private static readonly string ManifestPath = Path.Combine(AppContext.BaseDirectory, "screenview.vrmanifest");
 
     /// <summary>SteamVR 起動時の自動起動をオンにする。既にオンなら何もしない。</summary>
-    internal static void Register()
+    internal static async Task RegisterAsync(CancellationToken cancellationToken)
     {
         if (!File.Exists(ManifestPath))
         {
@@ -30,8 +30,9 @@ internal static class SteamVrAutoLaunch
         }
 
         // OpenVR コンテキストは FloatSodaApp が初期化するので、整うまで数回リトライする。
-        for (var attempt = 1; ; attempt++)
+        for (var attempt = 1; attempt <= 5; attempt++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             try
             {
                 if (TryEnable(out var alreadyEnabled))
@@ -43,17 +44,23 @@ internal static class SteamVrAutoLaunch
 
                 // アプリが未登録だと SetApplicationAutoLaunch が失敗するため、マニフェストを登録してから再度試す。
                 // 同一パスの vrmanifest の再登録は冪等(SteamVR 側で「更新」として扱われる)。
+                cancellationToken.ThrowIfCancellationRequested();
                 OVRApplications.AddManifest(ManifestPath);
 
+                cancellationToken.ThrowIfCancellationRequested();
                 if (TryEnable(out _))
                 {
                     Console.WriteLine($"SteamVR 自動起動を有効化しました (マニフェスト登録後, app_key={AppKey})");
                     return;
                 }
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
             catch (Exception e)
             {
-                if (attempt >= 5)
+                if (attempt == 5)
                 {
                     Console.Error.WriteLine($"SteamVR 自動起動の有効化に失敗しました(非致命): {e.Message}");
                     return;
@@ -61,7 +68,17 @@ internal static class SteamVrAutoLaunch
                 Console.WriteLine($"SteamVR 自動起動の有効化を再試行します({attempt}/5): {e.Message}");
             }
 
-            Thread.Sleep(2000);
+            if (attempt < 5)
+            {
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    return;
+                }
+            }
         }
     }
 
