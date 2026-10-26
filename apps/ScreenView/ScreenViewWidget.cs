@@ -12,6 +12,36 @@ using SkiaSharp;
 
 namespace FloatSoda.Apps.ScreenView;
 
+/// <summary>ウィンドウ候補の列挙結果。成功時は候補一覧、失敗時はエラー文を保持します。</summary>
+public sealed record CandidateRefreshResult
+{
+    private CandidateRefreshResult(IReadOnlyList<WindowInfo>? candidates, string? error)
+    {
+        Candidates = candidates;
+        Error = error;
+    }
+
+    /// <summary>列挙に成功したときの候補一覧。失敗時は <see langword="null"/> です。</summary>
+    public IReadOnlyList<WindowInfo>? Candidates { get; }
+
+    /// <summary>列挙に失敗したときの説明。成功時は <see langword="null"/> です。</summary>
+    public string? Error { get; }
+
+    /// <summary>成功した候補一覧を作成します。</summary>
+    public static CandidateRefreshResult Succeeded(IReadOnlyList<WindowInfo> candidates)
+    {
+        ArgumentNullException.ThrowIfNull(candidates);
+        return new CandidateRefreshResult(candidates, null);
+    }
+
+    /// <summary>失敗した候補列挙結果を作成します。</summary>
+    public static CandidateRefreshResult Failed(string error)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(error);
+        return new CandidateRefreshResult(null, error);
+    }
+}
+
 /// <summary>
 /// 指定されたウィンドウのライブキャプチャを自身の領域へ表示し、上部のヘッダーバーと
 /// オーバーレイ上のシートからキャプチャ対象を選べるようにするStatefulWidgetです。
@@ -60,18 +90,18 @@ public record ScreenViewWidget : StatefulWidget<ScreenViewWidget>
     /// <summary>候補ウィンドウを列挙する関数。ピッカーを開くときと [再列挙] のときだけ呼ばれます。</summary>
     /// <remarks>
     /// Win32 のウィンドウ/プロセス列挙を含むため、呼び出し側はメインループを止めないよう
-    /// バックグラウンド スレッドで実行し、結果を <see cref="OfferCandidates"/> で返します。
+    /// バックグラウンド スレッドで実行し、結果を <see cref="OfferCandidateResult"/> で返します。
     /// </remarks>
     public Func<IReadOnlyList<WindowInfo>>? CandidateEnumerator { get; init; }
 
     /// <summary>候補の再列挙を裏スレッドへ要求する関数。既定は <see cref="CandidateEnumerator"/> をその場で実行する。</summary>
     /// <remarks>
     /// 指定した場合、ウィジェットは自分で列挙せずこの関数だけを呼ぶ。呼び出し側は完了後に
-    /// <see cref="OfferCandidates"/> をメインスレッドから呼んで結果を返すこと。
+    /// <see cref="OfferCandidateResult"/> をメインスレッドから呼んで結果を返すこと。
     /// 裏スレッドから呼ばれるため、State のものではなく呼び出し側が用意した
     /// <c>FloatSodaApp.Post</c> を使う必要がある。
     /// </remarks>
-    public Action? RequestCandidateRefresh { get; set; }
+    public Action<long>? RequestCandidateRefresh { get; set; }
 
     /// <summary>ピッカーの開閉を外部(コントローラ割当)から要求するための口。</summary>
     /// <remarks>
@@ -81,21 +111,36 @@ public record ScreenViewWidget : StatefulWidget<ScreenViewWidget>
     /// </remarks>
     public Action? TogglePickerRequested { get; set; }
 
-    /// <summary>候補の列挙結果を渡す口。開いているページの送りもここで行う。</summary>
+    /// <summary>要求番号と候補の列挙結果を渡す口。</summary>
     /// <remarks>
     /// 裏スレッドで列挙した結果を <c>FloatSodaApp.Post</c> 経由でメインスレッドから呼ぶ。
     /// シートが閉じているときは無視する(開き直し時に必ず再列挙するため、古い結果を保持しない)。
     /// </remarks>
-    public Action<IReadOnlyList<WindowInfo>>? OfferCandidates { get; set; }
+    public Action<long, CandidateRefreshResult>? OfferCandidateResult { get; set; }
 
     /// <summary>シートを開いているかどうか。開閉判定は状態側が持つため、参照のみ提供する。</summary>
     public Func<bool>? IsPickerOpen { get; set; }
+
+    /// <summary>ピッカー内部の再読込要求をStateへ結び付けるデリゲート。</summary>
+    internal Action? RefreshPickerRequested { get; set; }
+
+    /// <summary>ピッカー内部の閉じる要求をStateへ結び付けるデリゲート。</summary>
+    internal Action? ClosePickerRequested { get; set; }
+
+    /// <summary>ピッカー内部の対象選択をStateへ結び付けるデリゲート。</summary>
+    internal Action<WindowInfo>? PickWindowRequested { get; set; }
 
     /// <inheritdoc />
     public override State<ScreenViewWidget> CreateState() => new ScreenViewState();
 
     private sealed class ScreenViewState : State<ScreenViewWidget>
     {
+        private readonly Action _refreshPickerCallback;
+        private readonly Action _closePickerCallback;
+        private readonly Action<WindowInfo> _pickWindowCallback;
+        private readonly Action _togglePickerCallback;
+        private readonly Action<long, CandidateRefreshResult> _offerCandidateResultCallback;
+        private readonly Func<bool> _isPickerOpenCallback;
         private WindowCaptureSession? _session;
         private bool _ownedSession;
         private SKImage? _frame;
@@ -104,6 +149,18 @@ public record ScreenViewWidget : StatefulWidget<ScreenViewWidget>
         private bool _pickerOpen;
         private IReadOnlyList<WindowInfo> _candidates = [];
         private string? _candidateMessage;
+        private bool _isCandidateRefreshing;
+        private long _candidateRequestGeneration;
+
+        public ScreenViewState()
+        {
+            _refreshPickerCallback = RefreshCandidates;
+            _closePickerCallback = ClosePicker;
+            _pickWindowCallback = PickWindow;
+            _togglePickerCallback = TogglePicker;
+            _offerCandidateResultCallback = OfferCandidateResult;
+            _isPickerOpenCallback = () => _pickerOpen;
+        }
 
         public override void InitState()
         {
@@ -141,9 +198,12 @@ public record ScreenViewWidget : StatefulWidget<ScreenViewWidget>
         /// <summary>現在のウィジェットへ外部からの要求口を登録する。</summary>
         private void BindHooks()
         {
-            Widget!.TogglePickerRequested = TogglePicker;
-            Widget!.OfferCandidates = OfferCandidates;
-            Widget!.IsPickerOpen = () => _pickerOpen;
+            Widget!.TogglePickerRequested = _togglePickerCallback;
+            Widget!.OfferCandidateResult = _offerCandidateResultCallback;
+            Widget!.IsPickerOpen = _isPickerOpenCallback;
+            Widget!.RefreshPickerRequested = _refreshPickerCallback;
+            Widget!.ClosePickerRequested = _closePickerCallback;
+            Widget!.PickWindowRequested = _pickWindowCallback;
         }
 
         /// <summary>古いウィジェットから要求口を外す。</summary>
@@ -151,8 +211,11 @@ public record ScreenViewWidget : StatefulWidget<ScreenViewWidget>
         {
             if (oldWidget is null) return;
             oldWidget.TogglePickerRequested = null;
-            oldWidget.OfferCandidates = null;
+            oldWidget.OfferCandidateResult = null;
             oldWidget.IsPickerOpen = null;
+            oldWidget.RefreshPickerRequested = null;
+            oldWidget.ClosePickerRequested = null;
+            oldWidget.PickWindowRequested = null;
         }
 
         /// <summary>メインスレッドから呼ばれる。シートの開閉と候補の再列挙要求を行う。</summary>
@@ -160,45 +223,78 @@ public record ScreenViewWidget : StatefulWidget<ScreenViewWidget>
         {
             if (_pickerOpen)
             {
-                SetState(() => _pickerOpen = false);
+                ClosePicker();
+                return;
+            }
+
+            SetState(() => _pickerOpen = true);
+            RefreshCandidates();
+        }
+
+        private void ClosePicker() => SetState(() => _pickerOpen = false);
+
+        /// <summary>候補列挙を要求する。外部要求を優先し、無いときはその場で列挙する。</summary>
+        private void RefreshCandidates()
+        {
+            var generation = ++_candidateRequestGeneration;
+            SetState(() =>
+            {
+                _isCandidateRefreshing = true;
+                _candidateMessage = "候補を列挙しています…";
+            });
+
+            var requestRefresh = Widget!.RequestCandidateRefresh;
+            if (requestRefresh is not null)
+            {
+                try
+                {
+                    requestRefresh(generation);
+                }
+                catch (Exception e)
+                {
+                    OfferCandidateResult(generation, CandidateRefreshResult.Failed(Describe(e)));
+                }
+                return;
+            }
+
+            try
+            {
+                OfferCandidateResult(generation,
+                    CandidateRefreshResult.Succeeded(Widget!.CandidateEnumerator?.Invoke() ?? []));
+            }
+            catch (Exception e)
+            {
+                OfferCandidateResult(generation, CandidateRefreshResult.Failed(Describe(e)));
+            }
+        }
+
+        private static string Describe(Exception exception) =>
+            string.IsNullOrWhiteSpace(exception.Message) ? exception.GetType().Name : exception.Message;
+
+        /// <summary>列挙結果を状態へ反映する。</summary>
+        private void OfferCandidateResult(long generation, CandidateRefreshResult result)
+        {
+            // シートが閉じている間の結果は保持しない(開き直し時に必ず再列挙する)。
+            if (!_pickerOpen || generation != _candidateRequestGeneration) return;
+
+            if (result.Error is { } error)
+            {
+                Console.Error.WriteLine($"[ScreenView] 候補の列挙に失敗しました: {error}");
+                SetState(() =>
+                {
+                    _isCandidateRefreshing = false;
+                    _candidateMessage = $"候補の列挙に失敗しました: {error}";
+                });
                 return;
             }
 
             SetState(() =>
             {
-                _pickerOpen = true;
-                _candidateMessage = "候補を列挙しています…";
-            });
-            RefreshCandidates();
-        }
-
-        /// <summary>候補列挙を要求する。外部要求を優先し、無いときはその場で列挙する。</summary>
-        private void RefreshCandidates()
-        {
-            var requestRefresh = Widget!.RequestCandidateRefresh;
-            if (requestRefresh is not null)
-            {
-                requestRefresh();
-                return;
-            }
-
-            ApplyCandidates(Widget!.CandidateEnumerator?.Invoke() ?? []);
-        }
-
-        /// <summary>列挙結果を状態へ反映する。</summary>
-        private void OfferCandidates(IReadOnlyList<WindowInfo> candidates)
-        {
-            // シートが閉じている間の結果は保持しない(開き直し時に必ず再列挙する)。
-            if (!_pickerOpen) return;
-            ApplyCandidates(candidates);
-        }
-
-        private void ApplyCandidates(IReadOnlyList<WindowInfo> candidates)
-            => SetState(() =>
-            {
-                _candidates = candidates;
+                _candidates = result.Candidates ?? [];
+                _isCandidateRefreshing = false;
                 _candidateMessage = null;
             });
+        }
 
         /// <summary>行が選ばれたときの処理。対象を切り替えてシートを閉じる。</summary>
         private void PickWindow(WindowInfo window)
@@ -215,7 +311,7 @@ public record ScreenViewWidget : StatefulWidget<ScreenViewWidget>
                 Console.Error.WriteLine($"[ScreenView] 切替先 (HWND=0x{window.Handle:X}) を受け入れられませんでした。");
             }
 
-            SetState(() => _pickerOpen = false);
+            ClosePicker();
         }
 
         /// <summary>キャプチャ スレッドから呼ばれます(WatchWidget と同じ Timer + SetState のパターン)。</summary>
@@ -274,10 +370,14 @@ public record ScreenViewWidget : StatefulWidget<ScreenViewWidget>
                     {
                         Candidates = _candidates,
                         ActiveHandle = _currentHandle,
-                        EmptyMessage = _candidateMessage ?? "候補ウィンドウがありません。",
-                        OnReload = RefreshCandidates,
-                        OnClose = () => SetState(() => _pickerOpen = false),
-                        OnPick = PickWindow,
+                        EmptyMessage = _candidates.Count == 0
+                            ? _candidateMessage ?? "候補ウィンドウがありません。"
+                            : "候補ウィンドウがありません。",
+                        StatusMessage = _candidates.Count > 0 ? _candidateMessage : null,
+                        IsRefreshing = _isCandidateRefreshing,
+                        OnReload = Widget!.RefreshPickerRequested,
+                        OnClose = Widget!.ClosePickerRequested,
+                        OnPick = Widget!.PickWindowRequested,
                     },
                 });
             }
