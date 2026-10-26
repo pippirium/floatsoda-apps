@@ -149,6 +149,18 @@
 
 ## 5. 引き継ぎ・将来
 
+### Phase 1 までで残っている作業（2026-10-26）
+
+- **実機確認（PR #2）**: `[一覧]` / 行タップ / `--switch` 長押し開閉 / Dpm 違いでの視認性 /
+  改名後 `app_key` の `IdentifyApplication` / `WristAgent` との同時起動。HMD が USB から
+  消えており（`Init_HmdNotFound`）未実施
+- **残タスクの実装計画は [PLAN-ScreenView-followups.md](PLAN-ScreenView-followups.md)**:
+  1. `--process` の既定値 `chrome` を「前面のウィンドウ」へ変更
+  2. ピッカー `[再読込]` の列挙結果の扱い（失敗が UI に届かず「列挙しています…」で固まる、
+     連打で古い応答が勝つ、0 件と失敗が区別できない）を直す
+
+### 以前からの引き継ぎ
+
 - `WristAgent` の名称も `FloatSoda.Apps.WristAgent` へ統一するかどうか(改名で
   オーバーレイキーが変わるため、振動/OSK のキー依存の確認が要る)。本計画では触らない
 - `ListView` がスクロール基盤ごと公開されたら、ピッカーを改ページからスクロール一覧へ作り替える
