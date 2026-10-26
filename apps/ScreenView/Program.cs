@@ -111,7 +111,7 @@ var captureSession = new WindowCaptureSession(fpsLimit);
 
 // 候補の列挙は Win32 のウィンドウ + プロセス参照を伴うため裏スレッドで走らせ、
 // 結果は Post でメインスレッドへ返す(メインスレッド STA で Win32 列挙を直接やらない)。
-// 差し出し口(OfferCandidates)はウィジェットがマウントされたときに State 側がバインドするため、
+// 差し出し口(OfferCandidateResult)はウィジェットがマウントされたときに State 側がバインドするため、
 // widget を先に宣言してからこの関数を定義する(ローカル関数を式の中で先に参照できない)。
 var widget = new ScreenViewWidget
 {
@@ -122,20 +122,20 @@ var widget = new ScreenViewWidget
     CandidateEnumerator = WindowTargets.EnumerateCandidates,
 };
 
-void RefreshCandidates() => Task.Run(() =>
+void RefreshCandidates(long generation) => _ = Task.Run(() =>
 {
-    IReadOnlyList<WindowInfo> candidates;
+    CandidateRefreshResult result;
     try
     {
-        candidates = WindowTargets.EnumerateCandidates();
+        result = CandidateRefreshResult.Succeeded(WindowTargets.EnumerateCandidates());
     }
     catch (Exception e)
     {
-        Console.Error.WriteLine($"[ScreenView] 候補の列挙に失敗しました: {e.Message}");
-        return;
+        var message = string.IsNullOrWhiteSpace(e.Message) ? e.GetType().Name : e.Message;
+        result = CandidateRefreshResult.Failed(message);
     }
 
-    app.Post(() => widget.OfferCandidates?.Invoke(candidates));
+    app.Post(() => widget.OfferCandidateResult?.Invoke(generation, result));
 });
 
 widget.RequestCandidateRefresh = RefreshCandidates;
