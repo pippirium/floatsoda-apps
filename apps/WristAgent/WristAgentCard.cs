@@ -12,8 +12,9 @@ namespace FloatSoda.Samples.WristAgent;
 
 /// <summary>腕ディスプレイに表示する要求カード。保留中の要求と最近の履歴を表示します。</summary>
 /// <param name="Broker">要求ブローカー。表示内容の観察元です。</param>
+/// <param name="DebugLog">デバッグ時のログ表示。null の場合はログ画面を非表示にします。</param>
 /// <param name="Input">SteamVR OSK によるフリーテキスト入力。null の場合は[入力]ボタンが非表示になります。</param>
-public record WristAgentCard(ApprovalBroker Broker, WristInputService? Input = null) : StatefulWidget<WristAgentCard>
+public record WristAgentCard(ApprovalBroker Broker, WristInputService? Input = null, WristDebugLog? DebugLog = null) : StatefulWidget<WristAgentCard>
 {
     public override State<WristAgentCard> CreateState() => new WristAgentCardState();
 }
@@ -29,15 +30,20 @@ public class WristAgentCardState : State<WristAgentCard>
     private static readonly SKColor SubTextColor = SKColor.Parse("#9AA0A6");
     private static readonly SKColor AccentColor = SKColor.Parse("#8AB4F8");
 
+    private bool _showLogs;
+    private int _logPage;
+
     public override void InitState()
     {
         // 変化通知は必ずメインスレッドから発火する(ApprovalBroker の契約)ため、そのまま SetState してよい。
         Widget!.Broker.Changed += OnBrokerChanged;
+        if (Widget.DebugLog is { } log) log.Changed += OnBrokerChanged;
     }
 
     public override void Dispose()
     {
         Widget?.Broker.Changed -= OnBrokerChanged;
+        if (Widget?.DebugLog is { } log) log.Changed -= OnBrokerChanged;
         base.Dispose();
     }
 
@@ -51,24 +57,44 @@ public class WristAgentCardState : State<WristAgentCard>
 
         var children = new List<Widget> { BuildHeader(pending.Count == 0 ? "待機中" : $"要確認 ×{pending.Count}") };
 
-        foreach (var request in pending)
+        if (Widget.DebugLog is not null)
         {
-            children.Add(BuildRequestCard(request));
+            children.Add(new Row
+            {
+                Children =
+                [
+                    BuildButton("要求", NeutralColor, () => SetState(() => _showLogs = false)),
+                    new SizedBox { Width = 8 },
+                    BuildButton("ログ", NeutralColor, () => SetState(() => _showLogs = true)),
+                ],
+            });
         }
 
-        if (pending.Count == 0)
+        if (_showLogs && Widget.DebugLog is { } debugLog)
         {
-            children.Add(Space(new Text("待機中 — エージェントの要求が届くとここにカードが出ます") { Style = Sub(15) }, 14));
+            BuildLogs(children, debugLog);
         }
-
-        if (history.Count > 0)
+        else
         {
-            children.Add(Space(new Text("最近の返答") { Style = Sub(15) }, 10));
-        }
+            foreach (var request in pending)
+            {
+                children.Add(BuildRequestCard(request));
+            }
 
-        foreach (var (request, answer) in history)
-        {
-            children.Add(Space(new Text($"[{answer.Decision}] {Describe(request)}") { Style = Sub(13, SubTextColor) }, 3));
+            if (pending.Count == 0)
+            {
+                children.Add(Space(new Text("待機中 — エージェントの要求が届くとここにカードが出ます") { Style = Sub(15) }, 14));
+            }
+
+            if (history.Count > 0)
+            {
+                children.Add(Space(new Text("最近の返答") { Style = Sub(15) }, 10));
+            }
+
+            foreach (var (request, answer) in history)
+            {
+                children.Add(Space(new Text($"[{answer.Decision}] {Describe(request)}") { Style = Sub(13, SubTextColor) }, 3));
+            }
         }
 
         return new ClipRoundRect
@@ -93,6 +119,34 @@ public class WristAgentCardState : State<WristAgentCard>
                 },
             },
         };
+    }
+
+    private void BuildLogs(List<Widget> children, WristDebugLog log)
+    {
+        const int pageSize = 6;
+        var entries = log.Entries;
+        var pages = Math.Max(1, (entries.Length + pageSize - 1) / pageSize);
+        _logPage = Math.Clamp(_logPage, 0, pages - 1);
+        children.Add(Space(new Text($"Debug ログ {_logPage + 1}/{pages}（新しい順・最大100件）") { Style = Sub(15) }, 12));
+        children.Add(new Row
+        {
+            Children =
+            [
+                BuildButton("最新", NeutralColor, () => SetState(() => _logPage = 0)),
+                new SizedBox { Width = 8 },
+                BuildButton("◀", NeutralColor, () => SetState(() => _logPage = Math.Max(0, _logPage - 1))),
+                new SizedBox { Width = 8 },
+                BuildButton("▶", NeutralColor, () => SetState(() => _logPage = Math.Min(pages - 1, _logPage + 1))),
+            ],
+        });
+        foreach (var entry in entries.Skip(_logPage * pageSize).Take(pageSize))
+        {
+            // 長い行はカードをはみ出さない範囲に省略する。完全なログはコンソールで確認できる。
+            var text = entry.Length > 160 ? entry[..160] + "…" : entry;
+            children.Add(Space(new Text(text) { Style = Sub(14) }, 12));
+        }
+        if (entries.Length == 0)
+            children.Add(Space(new Text("ログはまだありません") { Style = Sub(15) }, 12));
     }
 
     private static Widget BuildHeader(string status) => new Padding
@@ -143,7 +197,9 @@ public class WristAgentCardState : State<WristAgentCard>
             new SizedBox { Width = 8 },
             BuildButton("続行", NeutralColor, () => Widget!.Broker.Resolve(request.Id, new WristAnswer("continue", null))),
             new SizedBox { Width = 8 },
-            BuildButton("入力", NeutralColor, () => Widget?.Input?.TryOpen(request.Id)),
+            ..(Widget?.Input is not null
+                ? new Widget[] { BuildButton("入力", NeutralColor, () => Widget?.Input?.TryOpen(request.Id)) }
+                : Array.Empty<Widget>()),
         ],
     };
 
