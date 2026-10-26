@@ -86,8 +86,15 @@ if (listIndex >= 0)
     return 0;
 }
 
-var target = WindowLocator.Pick(allWindows, titleFilter, processFilter, pidFilter) ?? throw new InvalidOperationException(
-    $"キャプチャ対象のウィンドウが見つかりませんでした。ウィンドウやプロセスは、--list-windows で一覧できます。");
+var targetResult = WindowLocator.Pick(allWindows, titleFilter, processFilter, pidFilter);
+if (targetResult is null)
+{
+    Console.Error.WriteLine(
+        "キャプチャ対象のウィンドウが見つかりませんでした。ウィンドウやプロセスは、--list-windows で一覧できます。");
+    return 1;
+}
+
+var target = targetResult.Value;
 Console.WriteLine($"キャプチャ対象: PID={target.ProcessId} HWND=0x{target.Handle:X} [{target.ProcessName}] {target.Title}");
 
 if (saveIndex >= 0)
