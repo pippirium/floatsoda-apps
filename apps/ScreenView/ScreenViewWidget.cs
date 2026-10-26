@@ -13,8 +13,8 @@ using SkiaSharp;
 namespace FloatSoda.Apps.ScreenView;
 
 /// <summary>
-/// 指定されたウィンドウのライブキャプチャを自身の領域へ表示し、上部のヘッダーバーと
-/// オーバーレイ上のシートからキャプチャ対象を選べるようにするStatefulWidgetです。
+/// 指定されたウィンドウのライブキャプチャを自身の領域へ表示し、オーバーレイ上のシートから
+/// キャプチャ対象を選べるようにするStatefulWidgetです。
 /// </summary>
 /// <remarks>
 /// <para>
@@ -257,16 +257,16 @@ public record ScreenViewWidget : StatefulWidget<ScreenViewWidget>
             var children = new List<Widget>
             {
                 new Positioned { Top = 0, Left = 0, Right = 0, Bottom = 0, Child = BuildCapture() },
-                new Positioned { Top = 0, Left = 0, Right = 0, Height = HeaderBarHeight, Child = BuildHeaderBar() },
             };
 
-            // シートはヘッダーバーの下から下端まで。ウィンドウ一杯のカバーを兼ねる
-            // (切替直後の空白フレームを覆う)。
+            // シートはトップから下端まで。ウィンドウ一杯のカバーを兼ねる
+            // (切替直後の空白フレームを覆う)。ヘッダーバーは廃止し、ピッカーは
+            // コントローラ割当(OverlayManipulator)のジェスチャだけで開閉する。
             if (_pickerOpen)
             {
                 children.Add(new Positioned
                 {
-                    Top = HeaderBarHeight,
+                    Top = 0,
                     Left = 0,
                     Right = 0,
                     Bottom = 0,
@@ -305,54 +305,6 @@ public record ScreenViewWidget : StatefulWidget<ScreenViewWidget>
             };
         }
 
-        /// <summary>キャプチャ パネルの上部に常設するヘッダーバー(現在の対象名と [一覧])。</summary>
-        private Widget BuildHeaderBar()
-        {
-            // 候補の列挙前(シート未操作時)でもヘッダーに対象名を出せるよう、
-            // ショートカットの列挙はしない:分かっている名前だけ使い、分からなければアプリ名を出す。
-            // WindowInfo は構造体のため、FirstOrDefault の該当なしは default(Handle=0, Title=null)。
-            // WindowInfo? に入れても null にならず `is { }` を通ってしまうので、HWND を鍵に確かめる。
-            var knownMatch = _candidates.FirstOrDefault(w => w.Handle == _currentHandle);
-            var label = knownMatch.Handle != 0
-                ? $"{knownMatch.ProcessName} — {WindowTargets.ElideMiddle(knownMatch.Title, HeaderTitleMaxLength)}"
-                : "Screen View";
-
-            return new GestureDetector
-            {
-                Behaviour = HitTestBehaviour.Opaque,
-                Child = new ColoredBox
-                {
-                    Color = HeaderColor,
-                    Child = new Padding
-                    {
-                        Spacing = EdgeInsets.Symmetric(vertical: 8, horizontal: 14),
-                        Child = new Row
-                        {
-                            CrossAxisAlignment = CrossAxisAlignment.Center,
-                            Children =
-                            [
-                                new Expanded { Child = new Text(label) { Style = HeaderStyle } },
-                                new GestureDetector
-                                {
-                                    Behaviour = HitTestBehaviour.Opaque,
-                                    OnTap = TogglePicker,
-                                    Child = new ColoredBox
-                                    {
-                                        Color = ButtonColor,
-                                        Child = new Padding
-                                        {
-                                            Spacing = EdgeInsets.Symmetric(vertical: 6, horizontal: 16),
-                                            Child = new Text("一覧") { Style = ButtonTextStyle },
-                                        },
-                                    },
-                                },
-                            ],
-                        },
-                    },
-                },
-            };
-        }
-
         public override void Dispose()
         {
             if (Widget is not null) UnbindHooks(Widget);
@@ -366,23 +318,10 @@ public record ScreenViewWidget : StatefulWidget<ScreenViewWidget>
             base.Dispose();
         }
 
-        private const int HeaderTitleMaxLength = 48;
-
-        /// <summary>ヘッダーバーの高さ。シート先端の基準に使う。</summary>
-        private const double HeaderBarHeight = 46;
-
         /// <summary>オーバーレイの既定の解像度。シート内の高さを確定させる基準に使う。</summary>
         private const double OverlayWidth = 1920;
         /// <summary><see cref="OverlayWidth"/> の高さ版。</summary>
         private const double OverlayHeight = 1080;
-
-        private static readonly SKColor HeaderColor = SKColor.Parse("#111318");
-        private static readonly SKColor ButtonColor = SKColor.Parse("#3C4453");
-        private static readonly SKColor TextColor = SKColor.Parse("#E8EAED");
-        private static readonly SKColor AccentColor = SKColor.Parse("#8AB4F8");
-
-        private static readonly TextStyle HeaderStyle = new() { FontSize = 24, Color = TextColor };
-        private static readonly TextStyle ButtonTextStyle = new() { FontSize = 24, Color = AccentColor, FontWeight = 700 };
     }
 }
 
