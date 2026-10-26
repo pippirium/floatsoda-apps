@@ -56,6 +56,9 @@ public sealed class OverlayManipulator : IDisposable
     private readonly bool _switchEnabled = true;
     private readonly CancellationTokenSource _cts = new();
     private readonly object _sync = new();
+    private readonly object _lifecycleSync = new();
+    private Task? _runTask;
+    private bool _disposed;
 
     private float _toggleHold;
     private bool _toggleFired;
@@ -87,21 +90,52 @@ public sealed class OverlayManipulator : IDisposable
             _switchEnabled = false;
             Console.Error.WriteLine("[OverlayManipulator] ピッカー開閉(--switch)の割当がパネル表示切替(--toggle)と同一のため、ピッカー開閉を無効にします。");
         }
-        // キーは src/FloatSoda/Core/WindowKeyGenerator.cs と同じ規則(エントリアセンブリ名 + タイトルのスネークケース)。
-        // 側の仕様が変わったときはこのコピーが先行して外れる点に注意。
+        // FloatSodaのWindowKeyGeneratorと同じ規則(エントリアセンブリ名 + タイトルのスネークケース)。
         var assemblyName = Assembly.GetEntryAssembly()?.GetName().Name ?? "sample_app";
         _overlayKey = $"{ToSnakeCase(assemblyName)}.{ToSnakeCase(overlayTitle)}";
     }
 
     /// <summary>入力ループをバックグラウンドで開始します。</summary>
-    public void Start() => _ = RunAsync();
-
-    /// <summary>入力ループを停止します。</summary>
-    public void Dispose()
+    public void Start()
     {
-        _cts.Cancel();
-        _cts.Dispose();
+        lock (_lifecycleSync)
+        {
+            if (_disposed) throw new ObjectDisposedException(nameof(OverlayManipulator));
+            _runTask ??= Task.Run(RunAsync);
+        }
     }
+
+    /// <summary>入力ループを停止し、実行中の OpenVR 呼び出しが終わるまで待機します。</summary>
+    public void StopAndWait()
+    {
+        Task? runTask;
+        lock (_lifecycleSync)
+        {
+            if (_disposed) return;
+            _disposed = true;
+            runTask = _runTask;
+            try
+            {
+                _cts.Cancel();
+            }
+            catch (Exception exception)
+            {
+                Console.Error.WriteLine($"[OverlayManipulator] 停止通知に失敗しました: {exception.Message}");
+            }
+        }
+
+        try
+        {
+            runTask?.GetAwaiter().GetResult();
+        }
+        finally
+        {
+            _cts.Dispose();
+        }
+    }
+
+    /// <summary>入力ループを停止し、実行中の OpenVR 呼び出しが終わるまで待機します。</summary>
+    public void Dispose() => StopAndWait();
 
     private async Task RunAsync()
     {
@@ -416,10 +450,6 @@ public sealed class OverlayManipulator : IDisposable
         return dt;
     }
 
-    /// <summary>
-    /// <c>WindowKeyGenerator.GenerateKey(Title)</c> と同一規則のスネークケース化。
-    /// 本体の実装が仕様変更されたときはここも直すこと。
-    /// </summary>
     private static string ToSnakeCase(string text)
     {
         var builder = new System.Text.StringBuilder(text.Length + 8);

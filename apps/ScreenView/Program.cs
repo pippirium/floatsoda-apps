@@ -112,6 +112,7 @@ builder.Services.AddFloatSoda(new FloatSodaOptions
 
 using var host = builder.Build();
 var app = host.Services.GetRequiredService<FloatSodaApp>();
+var appLifetime = host.Services.GetRequiredService<IHostApplicationLifetime>();
 
 // プログラムで保持して対象切替から使うため外部生成。Start はウィジェット側が行う。
 var captureSession = new WindowCaptureSession(fpsLimit);
@@ -168,26 +169,104 @@ app.CreateWindow(
 
 // --world ではワールドに浮かんだパネルをコントローラで捉えられるようにする(掴み移動・拡縮・ピッカー)。
 OverlayManipulator? manipulator = null;
+CancellationTokenSource? openVrWorkerCancellation = null;
+Task? autoLaunchTask = null;
+var openVrWorkerSync = new object();
+var openVrWorkersStopping = false;
 if (!useDesktop)
 {
-    // SteamVR 自動起動の vrmanifest 登録は OpenVR コンテキストが整うのを待って行うので背景で試す(非致命)。
-    _ = Task.Run(SteamVrAutoLaunch.Register);
-
     manipulator = new OverlayManipulator("Screen View", toggleSpec, switchSpec);
     // 割当の意味は「次の候補へ巡回」から「ピッカーの開閉」へ変更した。自動巡回は廃止する
     // (一覧が出るため巡回は不要)。入力ループは別スレッドなので Post でメインスレッドへ転送する。
     manipulator.TargetSwitchRequested += () => app.Post(() => widget.TogglePickerRequested?.Invoke());
-    manipulator.Start();
 }
+
+void StartOpenVrWorkers()
+{
+    lock (openVrWorkerSync)
+    {
+        if (openVrWorkersStopping) return;
+
+        openVrWorkerCancellation = new CancellationTokenSource();
+        manipulator?.Start();
+
+        // OpenVR 初期化後に開始する。登録は付加機能なのでバックグラウンドで試す。
+        var cancellationToken = openVrWorkerCancellation.Token;
+        if (!useDesktop)
+        {
+            autoLaunchTask = Task.Run(() => SteamVrAutoLaunch.RegisterAsync(cancellationToken), cancellationToken);
+        }
+    }
+}
+
+void StopOpenVrWorkers()
+{
+    CancellationTokenSource? cancellation;
+    Task? registrationTask;
+    lock (openVrWorkerSync)
+    {
+        if (openVrWorkersStopping) return;
+        openVrWorkersStopping = true;
+        cancellation = openVrWorkerCancellation;
+        registrationTask = autoLaunchTask;
+    }
+
+    try
+    {
+        cancellation?.Cancel();
+    }
+    catch (Exception exception)
+    {
+        Console.Error.WriteLine($"[ScreenView] OpenVR 裏処理の停止通知に失敗しました: {exception.Message}");
+    }
+
+    try
+    {
+        manipulator?.StopAndWait();
+    }
+    catch (Exception exception)
+    {
+        Console.Error.WriteLine($"[ScreenView] コントローラー入力の停止に失敗しました: {exception.Message}");
+    }
+    finally
+    {
+        try
+        {
+            registrationTask?.GetAwaiter().GetResult();
+        }
+        catch (OperationCanceledException)
+        {
+            // OpenVR の終了に合わせたキャンセルは正常系。
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine($"[ScreenView] SteamVR 自動起動処理の停止に失敗しました: {exception.Message}");
+        }
+        finally
+        {
+            cancellation?.Dispose();
+        }
+    }
+}
+
+using var stoppingRegistration = appLifetime.ApplicationStopping.Register(StopOpenVrWorkers);
 
 try
 {
-    await host.RunAsync();
+    await host.StartAsync();
+    StartOpenVrWorkers();
+    await host.WaitForShutdownAsync();
 }
 finally
 {
-    manipulator?.Dispose();
-    captureSession.Dispose();
+    try
+    {
+        StopOpenVrWorkers();
+    }
+    finally
+    {
+        captureSession.Dispose();
+    }
 }
 return 0;
 
