@@ -10,7 +10,7 @@ using SkiaSharp;
 // 自分のHMD上で任意のウィンドウの画面を見るアプリ。
 // Windows Graphics Capture でアプリ単位の画面を取り込み、FloatSoda の
 // RenderImage でリアルタイムに表示します。キャプチャ対象はオーバーレイ上の
-// ピッカー(上部の [一覧])から選べます。
+// ピッカーから選べます（ワールドはジェスチャ、dashboard/desktopは [一覧]）。
 //
 // 使い方:
 //   --desktop            SteamVRの代わりにデスクトップウィンドウで表示(HMDが不要な目視確認用)
@@ -30,7 +30,7 @@ using SkiaSharp;
 //   --save-frames <数値>  FloatSodaを起動せず、キャプチャ N 枚をPNG保存して終了する(デバッグ用)
 //
 // HMD 上での操作(--world のとき、OverlayManipulator):
-//   グリップ(左右どちらでも)   パネルを掴んで移動
+//   グリップ(左右どちらでも)   パネルを掴んで移動・回転(手をひねると回転、放すと固定)
 //   右スティック上下(掴まず)    パネルの幅(＝高さは縦横比)を拡縮(上=拡大)
 //   左 グリップ+スティック押し込み 0.7秒長押し  パネルの表示/非表示(--toggle で変更可)
 //   右 グリップ+スティック押し込み 0.3秒長押し  キャプチャ対象を選ぶピッカーの開閉(--switch で変更可)
@@ -86,8 +86,15 @@ if (listIndex >= 0)
     return 0;
 }
 
-var target = WindowLocator.Pick(allWindows, titleFilter, processFilter, pidFilter) ?? throw new InvalidOperationException(
-    $"キャプチャ対象のウィンドウが見つかりませんでした。ウィンドウやプロセスは、--list-windows で一覧できます。");
+var targetResult = WindowLocator.Pick(allWindows, titleFilter, processFilter, pidFilter);
+if (targetResult is null)
+{
+    Console.Error.WriteLine(
+        "キャプチャ対象のウィンドウが見つかりませんでした。ウィンドウやプロセスは、--list-windows で一覧できます。");
+    return 1;
+}
+
+var target = targetResult.Value;
 Console.WriteLine($"キャプチャ対象: PID={target.ProcessId} HWND=0x{target.Handle:X} [{target.ProcessName}] {target.Title}");
 
 if (saveIndex >= 0)
@@ -105,37 +112,47 @@ builder.Services.AddFloatSoda(new FloatSodaOptions
 
 using var host = builder.Build();
 var app = host.Services.GetRequiredService<FloatSodaApp>();
+var appLifetime = host.Services.GetRequiredService<IHostApplicationLifetime>();
 
 // プログラムで保持して対象切替から使うため外部生成。Start はウィジェット側が行う。
 var captureSession = new WindowCaptureSession(fpsLimit);
 
 // 候補の列挙は Win32 のウィンドウ + プロセス参照を伴うため裏スレッドで走らせ、
 // 結果は Post でメインスレッドへ返す(メインスレッド STA で Win32 列挙を直接やらない)。
-// 差し出し口(OfferCandidates)はウィジェットがマウントされたときに State 側がバインドするため、
+// 差し出し口(OfferCandidateResult)はウィジェットがマウントされたときに State 側がバインドするため、
 // widget を先に宣言してからこの関数を定義する(ローカル関数を式の中で先に参照できない)。
+// オーバーレイの初期比率を合わせるため、対象ウィンドウの寸法を先に実測する。
+var initialContent = WindowLocator.GetWindowClientSize(target.Handle);
+var widgetDefaultOverlaySize = new SKSize(
+    (float)ScreenViewWidget.DefaultOverlayWidth, (float)ScreenViewWidget.DefaultOverlayHeight);
+
 var widget = new ScreenViewWidget
 {
     WindowHandle = target.Handle,
+    // ワールド表示は常設ヘッダーを消す。dashboard/desktopではピッカーの操作導線を維持する。
+    ShowHeaderBar = useDashboard || useDesktop,
     MaxFps = fpsLimit,
+    OverlaySize = initialContent.IsEmpty ? widgetDefaultOverlaySize : initialContent,
+    InitialContentSize = initialContent,
     // 対象切替(コントローラ割当・ピッカー)で状態セッションを操作できるよう、外部で作って注入する。
     Session = captureSession,
     CandidateEnumerator = WindowTargets.EnumerateCandidates,
 };
 
-void RefreshCandidates() => Task.Run(() =>
+void RefreshCandidates(long generation) => _ = Task.Run(() =>
 {
-    IReadOnlyList<WindowInfo> candidates;
+    CandidateRefreshResult result;
     try
     {
-        candidates = WindowTargets.EnumerateCandidates();
+        result = CandidateRefreshResult.Succeeded(WindowTargets.EnumerateCandidates());
     }
     catch (Exception e)
     {
-        Console.Error.WriteLine($"[ScreenView] 候補の列挙に失敗しました: {e.Message}");
-        return;
+        var message = string.IsNullOrWhiteSpace(e.Message) ? e.GetType().Name : e.Message;
+        result = CandidateRefreshResult.Failed(message);
     }
 
-    app.Post(() => widget.OfferCandidates?.Invoke(candidates));
+    app.Post(() => widget.OfferCandidateResult?.Invoke(generation, result));
 });
 
 widget.RequestCandidateRefresh = RefreshCandidates;
@@ -151,7 +168,8 @@ app.CreateWindow(
             : new WorldSpaceWindow
             {
                 Title = "Screen View",
-                Size = new SKSize(1920, 1080),
+                // 初期寸法。キャプチャが始まるとウィジェットが対象ウィンドウの実測寸法へ更新する。
+                Size = widget.OverlaySize,
                 Child = widget,
                 Position = worldPosition == System.Numerics.Vector3.Zero
                     ? new System.Numerics.Vector3(0f, 1f, -1f)
@@ -161,26 +179,104 @@ app.CreateWindow(
 
 // --world ではワールドに浮かんだパネルをコントローラで捉えられるようにする(掴み移動・拡縮・ピッカー)。
 OverlayManipulator? manipulator = null;
+CancellationTokenSource? openVrWorkerCancellation = null;
+Task? autoLaunchTask = null;
+var openVrWorkerSync = new object();
+var openVrWorkersStopping = false;
 if (!useDesktop)
 {
-    // SteamVR 自動起動の vrmanifest 登録は OpenVR コンテキストが整うのを待って行うので背景で試す(非致命)。
-    _ = Task.Run(SteamVrAutoLaunch.Register);
-
     manipulator = new OverlayManipulator("Screen View", toggleSpec, switchSpec);
     // 割当の意味は「次の候補へ巡回」から「ピッカーの開閉」へ変更した。自動巡回は廃止する
     // (一覧が出るため巡回は不要)。入力ループは別スレッドなので Post でメインスレッドへ転送する。
     manipulator.TargetSwitchRequested += () => app.Post(() => widget.TogglePickerRequested?.Invoke());
-    manipulator.Start();
 }
+
+void StartOpenVrWorkers()
+{
+    lock (openVrWorkerSync)
+    {
+        if (openVrWorkersStopping) return;
+
+        openVrWorkerCancellation = new CancellationTokenSource();
+        manipulator?.Start();
+
+        // OpenVR 初期化後に開始する。登録は付加機能なのでバックグラウンドで試す。
+        var cancellationToken = openVrWorkerCancellation.Token;
+        if (!useDesktop)
+        {
+            autoLaunchTask = Task.Run(() => SteamVrAutoLaunch.RegisterAsync(cancellationToken), cancellationToken);
+        }
+    }
+}
+
+void StopOpenVrWorkers()
+{
+    CancellationTokenSource? cancellation;
+    Task? registrationTask;
+    lock (openVrWorkerSync)
+    {
+        if (openVrWorkersStopping) return;
+        openVrWorkersStopping = true;
+        cancellation = openVrWorkerCancellation;
+        registrationTask = autoLaunchTask;
+    }
+
+    try
+    {
+        cancellation?.Cancel();
+    }
+    catch (Exception exception)
+    {
+        Console.Error.WriteLine($"[ScreenView] OpenVR 裏処理の停止通知に失敗しました: {exception.Message}");
+    }
+
+    try
+    {
+        manipulator?.StopAndWait();
+    }
+    catch (Exception exception)
+    {
+        Console.Error.WriteLine($"[ScreenView] コントローラー入力の停止に失敗しました: {exception.Message}");
+    }
+    finally
+    {
+        try
+        {
+            registrationTask?.GetAwaiter().GetResult();
+        }
+        catch (OperationCanceledException)
+        {
+            // OpenVR の終了に合わせたキャンセルは正常系。
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine($"[ScreenView] SteamVR 自動起動処理の停止に失敗しました: {exception.Message}");
+        }
+        finally
+        {
+            cancellation?.Dispose();
+        }
+    }
+}
+
+using var stoppingRegistration = appLifetime.ApplicationStopping.Register(StopOpenVrWorkers);
 
 try
 {
-    await host.RunAsync();
+    await host.StartAsync();
+    StartOpenVrWorkers();
+    await host.WaitForShutdownAsync();
 }
 finally
 {
-    manipulator?.Dispose();
-    captureSession.Dispose();
+    try
+    {
+        StopOpenVrWorkers();
+    }
+    finally
+    {
+        captureSession.Dispose();
+    }
 }
 return 0;
 

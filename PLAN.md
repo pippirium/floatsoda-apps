@@ -15,7 +15,7 @@ ChromeView(Chrome / デスクトップ画面の VR オーバーレイ共有・�
 
 **禁止事項(運用中に絶対に行わない)**:
 
-- 上流 `sumx21t/FloatSoda` に対する **PR / Issue / あらゆる変更依頼**。
+- 上流 `sumx21t-3310/FloatSoda` に対する **PR / Issue / あらゆる変更依頼**。
   (上流リポジトリの URL 空間を対象にした送信操作は一切しない)
 
 **許可される操作(すべて fork 内でのみ)**:
@@ -88,11 +88,14 @@ git add engine && git commit -m "chore(engine): submodule を <commit> へ更新
 
 ```bash
 cd engine
-git remote add upstream https://github.com/sumx21t/FloatSoda.git   # 初回のみ
+git remote add upstream https://github.com/sumx21t-3310/FloatSoda.git   # 初回のみ(read-only)
 git checkout main && git fetch upstream
 git merge upstream/main      # 競合時は fork 側(自前差分)を優先して解消
 git push origin main
 ```
+
+**注意**: 上流 remote は**読み取り専用**で使う。`git push upstream …` に相当する操作は
+上の禁止事項に該当するため行わない(取り込みは `git fetch upstream` + fork 側の merge のみ)。
 
 **注意**: submodule 内で merge/push を行うと、submodule HEAD が先に進み、
 本リポジトリ側の pin が古くなる。エンジン更新が完了したら必ずステップ 3) の

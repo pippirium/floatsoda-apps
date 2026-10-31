@@ -13,7 +13,7 @@ namespace FloatSoda.Samples.WristAgent;
 /// <summary>腕ディスプレイに表示する要求カード。保留中の要求と最近の履歴を表示します。</summary>
 /// <param name="Broker">要求ブローカー。表示内容の観察元です。</param>
 /// <param name="Input">SteamVR OSK によるフリーテキスト入力。null の場合は[入力]ボタンが非表示になります。</param>
-public record WristAgentCard(ApprovalBroker Broker, WristInputService? Input = null) : StatefulWidget<WristAgentCard>
+public record WristAgentCard(ApprovalBroker Broker, WristInputService? Input = null, CodexVoiceController? Voice = null) : StatefulWidget<WristAgentCard>
 {
     public override State<WristAgentCard> CreateState() => new WristAgentCardState();
 }
@@ -33,11 +33,13 @@ public class WristAgentCardState : State<WristAgentCard>
     {
         // 変化通知は必ずメインスレッドから発火する(ApprovalBroker の契約)ため、そのまま SetState してよい。
         Widget!.Broker.Changed += OnBrokerChanged;
+        if (Widget.Voice is { } voice) voice.Changed += OnBrokerChanged;
     }
 
     public override void Dispose()
     {
         Widget?.Broker.Changed -= OnBrokerChanged;
+        if (Widget?.Voice is { } voice) voice.Changed -= OnBrokerChanged;
         base.Dispose();
     }
 
@@ -50,6 +52,7 @@ public class WristAgentCardState : State<WristAgentCard>
         var history = broker.History;
 
         var children = new List<Widget> { BuildHeader(pending.Count == 0 ? "待機中" : $"要確認 ×{pending.Count}") };
+        if (Widget.Voice is { } voice) children.Add(BuildVoiceControls(voice));
 
         foreach (var request in pending)
         {
@@ -109,6 +112,48 @@ public class WristAgentCardState : State<WristAgentCard>
             ],
         },
     };
+
+    private static Widget BuildVoiceControls(CodexVoiceController voice) => new Padding
+    {
+        Spacing = EdgeInsets.Symmetric(vertical: 10),
+        Child = new ColoredBox
+        {
+            Color = CardColor,
+            Child = new Padding
+            {
+                Spacing = EdgeInsets.All(14),
+                Child = new Column
+                {
+                    Children =
+                    [
+                        new Text("Codex 音声入力") { Style = Sub(20, AccentColor) },
+                        Space(new Text(voice.Status.Message) { Style = Sub(15) }, 6),
+                        Space(new Row
+                        {
+                            Children =
+                            [
+                                new Expanded { Child = VoiceButton("音声入力", voice.Status.CanStart, NeutralColor, CodexVoiceAction.Start, voice) },
+                                new SizedBox { Width = 8 },
+                                new Expanded { Child = VoiceButton("録音停止", voice.Status.CanStop, DenyColor, CodexVoiceAction.Stop, voice) },
+                                new SizedBox { Width = 8 },
+                                new Expanded { Child = VoiceButton("送信", voice.Status.CanSend, AllowColor, CodexVoiceAction.Send, voice) },
+                            ],
+                        }, 10),
+                        Space(new Text("Codexで開いているチャットへ送信") { Style = Sub(13, SubTextColor) }, 6),
+                        Space(new Text("左スティック押込 ＋ 右A: 開始 / 右B: 停止（0.5秒）") { Style = Sub(13, SubTextColor) }, 6),
+                        Space(new Text("左スティック押込 ＋ 右A+B: 送信（1秒）") { Style = Sub(13, SubTextColor) }, 3),
+                        Space(new Text("左スティック押込 ＋ 右スティック上下: Codexスクロール") { Style = Sub(13, SubTextColor) }, 3),
+                    ],
+                },
+            },
+        },
+    };
+
+    private static Widget VoiceButton(string label, bool enabled, SKColor color, CodexVoiceAction action, CodexVoiceController voice) =>
+        BuildButton(label, enabled ? color : BackgroundColor, () =>
+        {
+            if (enabled) _ = voice.ExecuteAsync(action);
+        });
 
     private Widget BuildRequestCard(WristRequest request) => new Padding
     {
