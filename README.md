@@ -44,6 +44,8 @@ SteamVR/HMD で確認する場合は、(1) 右スティックで幅を変更、(
 
 ## 起動(SteamVR 起動中)
 
+準備・Release ビルド・起動・終了・自動起動の注意点は [SteamVR Overlay 起動手順書](docs/steamvr-overlay-startup.md) を参照してください。
+
 ```powershell
 dotnet run --project apps/WristAgent
 dotnet run --project apps/ScreenView
