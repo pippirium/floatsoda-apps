@@ -1,9 +1,8 @@
 using System.Net;
-using System.Collections.Concurrent;
-using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 
 namespace FloatSoda.Samples.WristAgent;
 
@@ -18,14 +17,17 @@ public sealed class WristHttpServer
     private readonly ApprovalBroker _broker;
     private readonly int _port;
     private readonly TimeSpan _waitTimeout;
+    private readonly ILogger<WristHttpServer>? _logger;
 
     /// <summary>サーバーを生成します。</summary>
     /// <param name="broker">要求の配送先ブローカー。</param>
     /// <param name="port">待ち受けポート。</param>
+    /// <param name="logger">HTTP の動作・エラーを記録するロガー。</param>
     /// <param name="waitTimeout">ユーザー返答の最大待ち時間。既定は5分。</param>
-    public WristHttpServer(ApprovalBroker broker, int port, TimeSpan? waitTimeout = null)
+    public WristHttpServer(ApprovalBroker broker, int port, TimeSpan? waitTimeout = null, ILogger<WristHttpServer>? logger = null)
     {
         _broker = broker;
+        _logger = logger;
         _port = port;
         _waitTimeout = waitTimeout ?? TimeSpan.FromMinutes(5);
     }
@@ -35,7 +37,7 @@ public sealed class WristHttpServer
     {
         var listener = new TcpListener(IPAddress.Loopback, _port);
         listener.Start();
-        Console.WriteLine($"WristAgent HTTP server: http://127.0.0.1:{_port}/requests");
+        _logger?.LogInformation("HTTP 待ち受け: http://127.0.0.1:{Port}/requests", _port);
 
         _ = Task.Run(() => AcceptLoop(listener));
     }
@@ -51,7 +53,7 @@ public sealed class WristHttpServer
             }
             catch (Exception e)
             {
-                Console.WriteLine($"accept error: {e.Message}");
+                _logger?.LogError(e, "HTTP 接続の受け付けに失敗");
                 return;
             }
 
@@ -73,6 +75,8 @@ public sealed class WristHttpServer
                     return;
                 }
 
+                _logger?.LogDebug("HTTP {Method}", request.Method);
+
                 if (request.Method == "GET" && request.Path == "/health")
                 {
                     await WriteResponseAsync(stream, 200, """{"status":"ok"}""");
@@ -91,7 +95,7 @@ public sealed class WristHttpServer
         }
         catch (Exception e)
         {
-            Console.WriteLine($"request error: {e.Message}");
+            _logger?.LogError(e, "HTTP 要求の処理に失敗");
         }
     }
 
@@ -113,6 +117,7 @@ public sealed class WristHttpServer
         var timedOut = await Task.WhenAny(askTask, Task.Delay(_waitTimeout)) != askTask;
         if (timedOut)
         {
+            _logger?.LogWarning("要求への返答がタイムアウトしました");
             return new AnswerPayload("timeout", null);
         }
 

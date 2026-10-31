@@ -15,6 +15,22 @@ dotnet run --project apps/WristAgent -- 8801
 
 SteamVR が起動している必要があります。起動すると左腕に `WristAgent` カードが出ます。
 
+### デスクトップでの動作確認とデバッグログ
+
+```powershell
+dotnet run --project apps/WristAgent -- --desktop --debug
+dotnet run --project apps/WristAgent -- 8801 --desktop --debug
+dotnet run --project apps/WristAgent -- --debug
+```
+
+`--desktop` は腕UIの代わりに通常のウィンドウを表示します。HTTPの承認要求は同様に受け付けます。
+現在のエンジンではこのモードでも SteamVR と HMD 接続が必要です。
+デスクトップではコントローラー振動・SteamVR OSKを無効にし、マウスで承認操作を確認できます。
+
+`--debug` はカードに「要求」「ログ」の切り替えを追加します。Debug以上のログを最大100件メモリに保持し、
+1ページ5件表示します。「最新」で先頭へ戻り、「◀」「▶」でページを切り替えます。
+要求本文・返答テキストは診断ログへ記録しません。ログファイル保存・外部転送は行いません。
+
 ## Codexの音声入力
 
 腕カードの上部に常時表示する3つのボタンで、ChatGPTデスクトップアプリ内のCodexを操作します。
