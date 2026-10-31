@@ -142,7 +142,7 @@ public class WristAgentCardState : State<WristAgentCard>
                         Space(new Text("Codexで開いているチャットへ送信") { Style = Sub(13, SubTextColor) }, 6),
                         Space(new Text("左スティック押込 ＋ 右A: 開始 / 右B: 停止（0.5秒）") { Style = Sub(13, SubTextColor) }, 6),
                         Space(new Text("左スティック押込 ＋ 右A+B: 送信（1秒）") { Style = Sub(13, SubTextColor) }, 3),
-                        Space(new Text("左スティック押込 ＋ 右スティック上下: スクロール") { Style = Sub(13, SubTextColor) }, 3),
+                        Space(new Text("左スティック押込 ＋ 右スティック上下: Codexスクロール") { Style = Sub(13, SubTextColor) }, 3),
                     ],
                 },
             },

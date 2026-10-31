@@ -2,7 +2,6 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <UseWPF>true</UseWPF>
     <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -13,7 +12,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Using Include="System.IO" />
     <ProjectReference Include="../ControllerInput/FloatSoda.Apps.ControllerInput.csproj" />
     <ProjectReference Include="..\..\engine\src\FloatSoda.Engine\FloatSoda.Engine.csproj" />
     <ProjectReference Include="..\..\engine\src\FloatSoda\FloatSoda.csproj" />

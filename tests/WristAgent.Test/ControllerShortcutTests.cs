@@ -1,9 +1,17 @@
 using FloatSoda.Apps.ControllerInput;
+using FloatSoda.Samples.WristAgent;
 
 namespace WristAgent.Test;
 
 public sealed class ControllerShortcutTests
 {
+    [Theory]
+    [InlineData("モード切り替え、現在のモード: Codex", true)]
+    [InlineData("Mode switcher, current mode: Codex", true)]
+    [InlineData("モード切り替え、現在のモード: Chat", false)]
+    [InlineData("Codexについてのチャット", false)]
+    public void IsCodexModeLabel_Codexのモード表示だけを認める(string label, bool expected) =>
+        Assert.Equal(expected, CodexChatScrollService.IsCodexModeLabel(label));
     private static ControllerFrame Frame(bool modifier = false, bool a = false, bool b = false, float y = 0) => new(true, modifier, a, b, y);
 
     [Theory]

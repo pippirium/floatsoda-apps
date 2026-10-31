@@ -54,7 +54,7 @@ public sealed class WindowsCodexVoiceTarget : ICodexVoiceTarget
             .Where(name => names.Contains(name.Trim(), StringComparer.OrdinalIgnoreCase)).Distinct().ToArray();
     }
 
-    private static AutomationElement? FindWindow()
+    internal static AutomationElement? FindWindow()
     {
         var handles = new List<nint>();
         foreach (var name in new[] { "ChatGPT", "Codex" })
