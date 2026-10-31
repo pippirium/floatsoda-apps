@@ -12,9 +12,9 @@ namespace FloatSoda.Samples.WristAgent;
 
 /// <summary>腕ディスプレイに表示する要求カード。保留中の要求と最近の履歴を表示します。</summary>
 /// <param name="Broker">要求ブローカー。表示内容の観察元です。</param>
-/// <param name="DebugLog">デバッグ時のログ表示。null の場合はログ画面を非表示にします。</param>
 /// <param name="Input">SteamVR OSK によるフリーテキスト入力。null の場合は[入力]ボタンが非表示になります。</param>
-public record WristAgentCard(ApprovalBroker Broker, WristInputService? Input = null, WristDebugLog? DebugLog = null) : StatefulWidget<WristAgentCard>
+/// <param name="DebugLog">メモリ内の診断ログ。nullでログ画面を無効にします。</param>
+public record WristAgentCard(ApprovalBroker Broker, WristInputService? Input = null, CodexVoiceController? Voice = null, WristDebugLog? DebugLog = null) : StatefulWidget<WristAgentCard>
 {
     public override State<WristAgentCard> CreateState() => new WristAgentCardState();
 }
@@ -37,12 +37,14 @@ public class WristAgentCardState : State<WristAgentCard>
     {
         // 変化通知は必ずメインスレッドから発火する(ApprovalBroker の契約)ため、そのまま SetState してよい。
         Widget!.Broker.Changed += OnBrokerChanged;
+        if (Widget.Voice is { } voice) voice.Changed += OnBrokerChanged;
         if (Widget.DebugLog is { } log) log.Changed += OnBrokerChanged;
     }
 
     public override void Dispose()
     {
         Widget?.Broker.Changed -= OnBrokerChanged;
+        if (Widget?.Voice is { } voice) voice.Changed -= OnBrokerChanged;
         if (Widget?.DebugLog is { } log) log.Changed -= OnBrokerChanged;
         base.Dispose();
     }
@@ -76,25 +78,17 @@ public class WristAgentCardState : State<WristAgentCard>
         }
         else
         {
-            foreach (var request in pending)
-            {
-                children.Add(BuildRequestCard(request));
-            }
+            if (Widget.Voice is { } voice) children.Add(BuildVoiceControls(voice));
+
+            foreach (var request in pending) children.Add(BuildRequestCard(request));
 
             if (pending.Count == 0)
-            {
                 children.Add(Space(new Text("待機中 — エージェントの要求が届くとここにカードが出ます") { Style = Sub(15) }, 14));
-            }
 
-            if (history.Count > 0)
-            {
-                children.Add(Space(new Text("最近の返答") { Style = Sub(15) }, 10));
-            }
+            if (history.Count > 0) children.Add(Space(new Text("最近の返答") { Style = Sub(15) }, 10));
 
             foreach (var (request, answer) in history)
-            {
                 children.Add(Space(new Text($"[{answer.Decision}] {Describe(request)}") { Style = Sub(13, SubTextColor) }, 3));
-            }
         }
 
         return new ClipRoundRect
@@ -123,7 +117,7 @@ public class WristAgentCardState : State<WristAgentCard>
 
     private void BuildLogs(List<Widget> children, WristDebugLog log)
     {
-        const int pageSize = 6;
+        const int pageSize = 5;
         var entries = log.Entries;
         var pages = Math.Max(1, (entries.Length + pageSize - 1) / pageSize);
         _logPage = Math.Clamp(_logPage, 0, pages - 1);
@@ -141,8 +135,7 @@ public class WristAgentCardState : State<WristAgentCard>
         });
         foreach (var entry in entries.Skip(_logPage * pageSize).Take(pageSize))
         {
-            // 長い行はカードをはみ出さない範囲に省略する。完全なログはコンソールで確認できる。
-            var text = entry.Length > 160 ? entry[..160] + "…" : entry;
+            var text = entry.Length > 90 ? entry[..90] + "…" : entry;
             children.Add(Space(new Text(text) { Style = Sub(14) }, 12));
         }
         if (entries.Length == 0)
@@ -163,6 +156,48 @@ public class WristAgentCardState : State<WristAgentCard>
             ],
         },
     };
+
+    private static Widget BuildVoiceControls(CodexVoiceController voice) => new Padding
+    {
+        Spacing = EdgeInsets.Symmetric(vertical: 10),
+        Child = new ColoredBox
+        {
+            Color = CardColor,
+            Child = new Padding
+            {
+                Spacing = EdgeInsets.All(14),
+                Child = new Column
+                {
+                    Children =
+                    [
+                        new Text("Codex 音声入力") { Style = Sub(20, AccentColor) },
+                        Space(new Text(voice.Status.Message) { Style = Sub(15) }, 6),
+                        Space(new Row
+                        {
+                            Children =
+                            [
+                                new Expanded { Child = VoiceButton("音声入力", voice.Status.CanStart, NeutralColor, CodexVoiceAction.Start, voice) },
+                                new SizedBox { Width = 8 },
+                                new Expanded { Child = VoiceButton("録音停止", voice.Status.CanStop, DenyColor, CodexVoiceAction.Stop, voice) },
+                                new SizedBox { Width = 8 },
+                                new Expanded { Child = VoiceButton("送信", voice.Status.CanSend, AllowColor, CodexVoiceAction.Send, voice) },
+                            ],
+                        }, 10),
+                        Space(new Text("Codexで開いているチャットへ送信") { Style = Sub(13, SubTextColor) }, 6),
+                        Space(new Text("左スティック押込 ＋ 右A: 開始 / 右B: 停止（0.5秒）") { Style = Sub(13, SubTextColor) }, 6),
+                        Space(new Text("左スティック押込 ＋ 右A+B: 送信（1秒）") { Style = Sub(13, SubTextColor) }, 3),
+                        Space(new Text("左スティック押込 ＋ 右スティック上下: Codexスクロール") { Style = Sub(13, SubTextColor) }, 3),
+                    ],
+                },
+            },
+        },
+    };
+
+    private static Widget VoiceButton(string label, bool enabled, SKColor color, CodexVoiceAction action, CodexVoiceController voice) =>
+        BuildButton(label, enabled ? color : BackgroundColor, () =>
+        {
+            if (enabled) _ = voice.ExecuteAsync(action);
+        });
 
     private Widget BuildRequestCard(WristRequest request) => new Padding
     {

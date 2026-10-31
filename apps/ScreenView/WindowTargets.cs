@@ -38,7 +38,9 @@ public static class WindowTargets
         return candidates
             .GroupBy(w => w.ProcessName, StringComparer.OrdinalIgnoreCase)
             .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
-            .Select(g => new WindowTargetGroup(g.Key, [.. g.OrderBy(w => w.Title, StringComparer.Ordinal)]))
+            // タイトルは取得失敗で null になり得るため、キーを空文字に正規化して比較する
+            // (StringComparer.Ordinal は null を渡すと NullReferenceException を投げる)。
+            .Select(g => new WindowTargetGroup(g.Key, [.. g.OrderBy(w => w.Title ?? string.Empty, StringComparer.Ordinal)]))
             .ToList();
     }
 
@@ -48,8 +50,14 @@ public static class WindowTargets
     /// <remarks>
     /// 先頭だけ切るのは「同じ前置きで始まる窓」の判別が効かないため、中点を置いて前後を残す。
     /// </remarks>
-    public static string ElideMiddle(string text, int maxLength)
+    /// <remarks>
+    /// <paramref name="text" /> が null の場合は空文字として扱う。タイトルは Win32 由来で、
+    /// ウィンドウのプロセスが応答しない/終了しかけていると取得に失敗して null になり得る。
+    /// ここで落ちるとウィンドウ一覧の描画ごとアプリが止まるため、表示側では弾かない。
+    /// </remarks>
+    public static string ElideMiddle(string? text, int maxLength)
     {
+        if (string.IsNullOrEmpty(text)) return string.Empty;
         if (text.Length <= maxLength) return text;
         if (maxLength <= 1) return "…"[..Math.Max(maxLength, 0)];
 

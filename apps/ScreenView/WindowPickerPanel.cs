@@ -44,6 +44,12 @@ public record WindowPickerPanel : StatefulWidget<WindowPickerPanel>
     /// <summary>候補が無いときに表示する文章。</summary>
     public string EmptyMessage { get; init; } = "候補ウィンドウがありません。";
 
+    /// <summary>候補を保持したまま再読込中または失敗したときに表示する状態文。</summary>
+    public string? StatusMessage { get; init; }
+
+    /// <summary>候補を再読込中かどうか。</summary>
+    public bool IsRefreshing { get; init; }
+
     /// <inheritdoc />
     public override State<WindowPickerPanel> CreateState() => new WindowPickerPanelState();
 
@@ -199,16 +205,40 @@ public record WindowPickerPanel : StatefulWidget<WindowPickerPanel>
             return pages;
         }
 
-        private Widget BuildSheetHeader() => new Flex
+        private Widget BuildSheetHeader()
         {
-            Direction = Axis.Horizontal,
-            CrossAxisAlignment = CrossAxisAlignment.Center,
-            Children =
-            [
-                new Expanded { Child = new Text("キャプチャ対象") { Style = HeaderStyle } },
-                BuildButton("閉じる", NeutralColor, () => Widget!.OnClose?.Invoke()),
-            ],
-        };
+            var titleChildren = new List<Widget>
+            {
+                new Text("キャプチャ対象") { Style = HeaderStyle },
+            };
+
+            if (Widget!.StatusMessage is { } statusMessage)
+            {
+                titleChildren.Add(new Text(WindowTargets.ElideMiddle(statusMessage, StatusMessageMaxLength))
+                {
+                    Style = StatusStyle,
+                });
+            }
+
+            return new Flex
+            {
+                Direction = Axis.Horizontal,
+                CrossAxisAlignment = CrossAxisAlignment.Center,
+                Children =
+                [
+                    new Expanded
+                    {
+                        Child = new Flex
+                        {
+                            Direction = Axis.Vertical,
+                            MainAxisSize = MainAxisSize.Min,
+                            Children = titleChildren,
+                        },
+                    },
+                    BuildButton("閉じる", NeutralColor, () => Widget!.OnClose?.Invoke()),
+                ],
+            };
+        }
 
         /// <summary>グループ ヘッダー。</summary>
         private static Widget BuildGroupHeader(WindowTargetGroup group) => new Container
@@ -282,15 +312,17 @@ public record WindowPickerPanel : StatefulWidget<WindowPickerPanel>
             CrossAxisAlignment = CrossAxisAlignment.Center,
             Children =
             [
-                BuildButton("◀", NeutralColor, () => GoPage(page - 1), page <= 0),
+                BuildButton("◀", NeutralColor, () => GoPage(page - 1),
+                    Widget!.IsRefreshing || pageCount == 0 || page <= 0),
                 new Padding
                 {
                     Spacing = EdgeInsets.Symmetric(horizontal: 14),
-                    Child = new Text($"{page + 1}/{pageCount}") { Style = RowStyle },
+                    Child = new Text(pageCount == 0 ? "–" : $"{page + 1}/{pageCount}") { Style = RowStyle },
                 },
-                BuildButton("▶", NeutralColor, () => GoPage(page + 1), page >= pageCount - 1),
+                BuildButton("▶", NeutralColor, () => GoPage(page + 1),
+                    Widget!.IsRefreshing || pageCount == 0 || page >= pageCount - 1),
                 new SizedBox { Width = 14 },
-                BuildButton("再読込", NeutralColor, () => Widget!.OnReload?.Invoke()),
+                BuildButton("再読込", NeutralColor, () => Widget!.OnReload?.Invoke(), Widget!.IsRefreshing),
             ],
         };
 
@@ -330,6 +362,7 @@ public record WindowPickerPanel : StatefulWidget<WindowPickerPanel>
         /// <remarks>engine の RenderFlex は子の寸法から自身の幅を逆算するため、揃えたいものは同じ幅を宣言する。</remarks>
         private const double ContentWidth = SheetWidth - Pad * 2;
         private const int TitleMaxLength = 60;
+        private const int StatusMessageMaxLength = 72;
 
         /// <summary>ページ制御を収める高さ。</summary>
         private const double PageFootHeight = 58;
@@ -373,6 +406,7 @@ public record WindowPickerPanel : StatefulWidget<WindowPickerPanel>
         private static readonly TextStyle RowStyle = new() { FontSize = 24, Color = TextColor };
         private static readonly TextStyle ActiveTextStyle = new() { FontSize = 24, Color = AccentColor, FontWeight = 700 };
         private static readonly TextStyle SubStyle = new() { FontSize = 24, Color = SubTextColor };
+        private static readonly TextStyle StatusStyle = new() { FontSize = 16, Color = SubTextColor };
         private static readonly TextStyle ButtonStyle = new() { FontSize = 24, Color = TextColor };
     }
 }
