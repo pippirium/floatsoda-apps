@@ -1,4 +1,3 @@
-using System.Buffers;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using SkiaSharp;
@@ -48,12 +47,24 @@ public sealed class WindowCaptureSession : IDisposable
     /// </remarks>
     public event Action<SKImage>? FrameUpdated;
 
+    /// <summary>描画中に画像が破棄・再利用されないよう、最新フレームをロック内で読み取ります。</summary>
+    internal bool WithLatestFrame(Action<SKImage> draw)
+    {
+        lock (_sync)
+        {
+            if (_disposed || _ring.Count == 0) return false;
+            draw(_ring.Last().Image);
+            return true;
+        }
+    }
+
     /// <summary>キャプチャを続けられなくなったときに発生します。</summary>
     /// <remarks>発生以後はこのセッションを再使用できません。原因は引数の文字列で受け取れます。</remarks>
     public event Action<string>? Failed;
 
     private readonly int _frameInterval;
     private readonly Queue<FramePinned> _ring = new();
+    private readonly CaptureFrameBufferPool _buffers = new();
     private readonly object _sync = new();
 
     private ID3D11Device? _d3dDevice;
@@ -470,7 +481,7 @@ public sealed class WindowCaptureSession : IDisposable
     /// </remarks>
     private SKImage? ExtractFrame(Direct3D11CaptureFrame frame)
     {
-        var tex = (ID3D11Texture2D)Marshal.GetObjectForIUnknown(GetNativeTexturePointer(frame))!;
+        var tex = GetNativeTexture(frame);
         try
         {
             tex.GetDesc(out var desc);
@@ -482,7 +493,7 @@ public sealed class WindowCaptureSession : IDisposable
             try
             {
                 int length = checked((int)mapped.RowPitch * (int)desc.Height);
-                var buffer = ArrayPool<byte>.Shared.Rent(length);
+                var buffer = _buffers.Rent(length);
                 unsafe
                 {
                     Marshal.Copy((nint)mapped.pData, buffer, 0, length);
@@ -506,22 +517,47 @@ public sealed class WindowCaptureSession : IDisposable
         }
     }
 
-    private unsafe nint GetNativeTexturePointer(Direct3D11CaptureFrame frame)
+    private unsafe ID3D11Texture2D GetNativeTexture(Direct3D11CaptureFrame frame)
     {
-        // 投影ラッパの frame から生の ABI ポインタを取り出し、COM 経路で表面を取得する。
+        // NativeObject.ThisPtrは借用。GetObjectForIUnknownで追加したRCW参照だけを解放する。
         nint frameAbi = ((IWinRTObject)frame).NativeObject.ThisPtr;
-        var frameNative = (IDirect3D11CaptureFrameNative)Marshal.GetObjectForIUnknown(frameAbi);
-        Marshal.ThrowExceptionForHR(frameNative.Surface(out var surfaceAbi));
+        var frameReference = Marshal.GetObjectForIUnknown(frameAbi);
         try
         {
-            var access = (IDirect3DDxgiInterfaceAccess)Marshal.GetObjectForIUnknown(surfaceAbi);
-            Guid iid = typeof(ID3D11Texture2D).GUID;
-            Marshal.ThrowExceptionForHR(access.GetInterface(ref iid, out var texture));
-            return texture;
+            nint surfaceAbi = 0;
+            try
+            {
+                Marshal.ThrowExceptionForHR(((IDirect3D11CaptureFrameNative)frameReference).Surface(out surfaceAbi));
+                var surfaceReference = Marshal.GetObjectForIUnknown(surfaceAbi);
+                try
+                {
+                    nint texture = 0;
+                    try
+                    {
+                        Guid iid = typeof(ID3D11Texture2D).GUID;
+                        Marshal.ThrowExceptionForHR(((IDirect3DDxgiInterfaceAccess)surfaceReference).GetInterface(ref iid, out texture));
+                        // 呼び出し元へ渡すRCWは、ExtractFrameのfinallyで解放する。
+                        return (ID3D11Texture2D)Marshal.GetObjectForIUnknown(texture);
+                    }
+                    finally
+                    {
+                        // GetInterfaceの所有参照と、上で作ったRCWの参照は別々に解放が必要。
+                        if (texture != 0) Marshal.Release(texture);
+                    }
+                }
+                finally
+                {
+                    Marshal.ReleaseComObject(surfaceReference);
+                }
+            }
+            finally
+            {
+                if (surfaceAbi != 0) Marshal.Release(surfaceAbi);
+            }
         }
         finally
         {
-            Marshal.Release(surfaceAbi);
+            Marshal.ReleaseComObject(frameReference);
         }
     }
 
@@ -564,7 +600,7 @@ public sealed class WindowCaptureSession : IDisposable
             var released = _ring.Dequeue();
             released.Image.Dispose();
             released.Pin.Free();
-            ArrayPool<byte>.Shared.Return(released.Buffer);
+            _buffers.Return(released.Buffer);
         }
     }
 
@@ -575,8 +611,9 @@ public sealed class WindowCaptureSession : IDisposable
             var entry = _ring.Dequeue();
             entry.Image.Dispose();
             entry.Pin.Free();
-            ArrayPool<byte>.Shared.Return(entry.Buffer);
+            _buffers.Return(entry.Buffer);
         }
+        _buffers.Clear();
     }
 
     private void NotifyFailed(string message) => Failed?.Invoke(message);
