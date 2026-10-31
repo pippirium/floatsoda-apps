@@ -29,8 +29,20 @@ public sealed class GlobalHotkeys
     [DllImport("user32.dll")]
     private static extern short GetAsyncKeyState(int vKey);
 
-    [DllImport("kernel32.dll")]
-    private static extern int GetMessage(nint lpMsg, nint hWnd, uint wMsgFilterMin, uint wMsgFilterMax);
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern int GetMessageW(out Msg lpMsg, nint hWnd, uint wMsgFilterMin, uint wMsgFilterMax);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Msg
+    {
+        public nint Hwnd;
+        public uint Message;
+        public nint WParam;
+        public nint LParam;
+        public uint Time;
+        public int PtX;
+        public int PtY;
+    }
 
     private delegate nint LowLevelKeyboardProc(int nCode, nint wParam, nint lParam);
 
@@ -65,7 +77,8 @@ public sealed class GlobalHotkeys
         }
 
         // GetMessage ループ。フックコールバックはこのスレッドのメッセージ処理で呼ばれる。
-        while (GetMessage(nint.Zero, nint.Zero, 0, 0) > 0)
+        // エクスポートは kernel32.dll ではなく user32.dll の GetMessageW(W 接尾辞必須)。
+        while (GetMessageW(out _, nint.Zero, 0, 0) > 0)
         {
         }
 
