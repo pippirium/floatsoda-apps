@@ -1,5 +1,6 @@
 <Solution>
     <Folder Name="/apps/">
+        <Project Path="apps/ControllerInput/FloatSoda.Apps.ControllerInput.csproj" />
         <Project Path="apps/ScreenView/FloatSoda.Apps.ScreenView.csproj" />
         <Project Path="apps/WristAgent/FloatSoda.Samples.WristAgent.csproj" />
     </Folder>
@@ -8,5 +9,6 @@
     </Folder>
     <Folder Name="/tests/">
         <Project Path="tests/ScreenView.Test/ScreenView.Test.csproj" />
+        <Project Path="tests/WristAgent.Test/WristAgent.Test.csproj" />
     </Folder>
 </Solution>

@@ -10,7 +10,7 @@ using SkiaSharp;
 // 自分のHMD上で任意のウィンドウの画面を見るアプリ。
 // Windows Graphics Capture でアプリ単位の画面を取り込み、FloatSoda の
 // RenderImage でリアルタイムに表示します。キャプチャ対象はオーバーレイ上の
-// ピッカー(上部の [一覧])から選べます。
+// ピッカーから選べます（ワールドはジェスチャ、dashboard/desktopは [一覧]）。起動時の既定は前面ウィンドウです。
 //
 // 使い方:
 //   --desktop            SteamVRの代わりにデスクトップウィンドウで表示(HMDが不要な目視確認用)
@@ -19,9 +19,9 @@ using SkiaSharp;
 //   --pos "x,y,z"        --world 時の初期配置座標(プレイエリア中央原点。既定は 0,1,-1)
 //   --yaw <度>           --world 時の初期水平回転(度)。既定は 0(正面を向く)
 //   --list-windows       候補ウィンドウの一覧を出して終了する
-//   --window <タイトル>   キャプチャするウィンドウをタイトル部分一致で指定(既定はchromeの先頭)
+//   --window <タイトル>   キャプチャするウィンドウをタイトル部分一致で指定(既定は前面ウィンドウ)
 //   --pid <数値>          キャプチャするウィンドウをプロセスIDで指定
-//   --process <名前>      対象プロセス名(既定は chrome)
+//   --process <名前>      対象プロセス名(省略可能)
 //   --fps <数値>          表示更新の上限(既定は 30)
 //   --toggle <割当>       パネル表示/非表示の割当(形式: <手>:<ボタン>[+grip][@<ms>])
 //                         手=L|R, ボタン=stick|a|trigger|menu|grip。既定は L:stick+grip@700
@@ -30,7 +30,7 @@ using SkiaSharp;
 //   --save-frames <数値>  FloatSodaを起動せず、キャプチャ N 枚をPNG保存して終了する(デバッグ用)
 //
 // HMD 上での操作(--world のとき、OverlayManipulator):
-//   グリップ(左右どちらでも)   パネルを掴んで移動
+//   グリップ(左右どちらでも)   パネルを掴んで移動・回転(手をひねると回転、放すと固定)
 //   右スティック上下(掴まず)    パネルの幅(＝高さは縦横比)を拡縮(上=拡大)
 //   左 グリップ+スティック押し込み 0.7秒長押し  パネルの表示/非表示(--toggle で変更可)
 //   右 グリップ+スティック押し込み 0.3秒長押し  キャプチャ対象を選ぶピッカーの開閉(--switch で変更可)
@@ -67,7 +67,8 @@ string GetOptionValueAfter(string name) =>
     Array.IndexOf(args, name) is var i && i >= 0 && i + 1 < args.Length ? args[i + 1] : string.Empty;
 
 var titleFilter = args.Contains("--window") ? GetOptionValueAfter("--window") : null;
-var processFilter = args.Contains("--process") ? GetOptionValueAfter("--process") : "chrome";
+// 対象を明示しない場合は前面ウィンドウを選ぶ。
+var processFilter = args.Contains("--process") ? GetOptionValueAfter("--process") : null;
 var pidFilter = uint.TryParse(GetOptionValueAfter("--pid"), out var parsedPid) ? parsedPid : 0u;
 var fpsLimit = int.TryParse(GetOptionValueAfter("--fps"), out var parsedFps) && parsedFps > 0 ? parsedFps : 30;
 // パネルの表示/非表示はコントローラ割当。既定は L:stick+grip@700(VRChat の操作と被りにくい組合せ)。
@@ -75,22 +76,27 @@ var toggleSpec = args.Contains("--toggle") ? GetOptionValueAfter("--toggle") : "
 var switchSpec = args.Contains("--switch") ? GetOptionValueAfter("--switch") : "R:stick+grip@300";
 
 var allWindows = WindowLocator.EnumerateVisibleWindows();
+var hasFilter = titleFilter is not null || processFilter is not null || pidFilter != 0;
+var targetResult = hasFilter
+    ? WindowLocator.Pick(allWindows, titleFilter, processFilter, pidFilter)
+    : WindowTargets.PickForeground(WindowTargets.EnumerateCandidates());
 
 if (listIndex >= 0)
 {
     foreach (var w in allWindows)
     {
-        var marker = w.ProcessName.Equals(processFilter, StringComparison.OrdinalIgnoreCase) ? " * " : "   ";
+        var marker = targetResult is { } selected && w.Handle == selected.Handle ? " * " : "   ";
         Console.WriteLine($"{marker}PID={w.ProcessId,8} HWND=0x{w.Handle:X} [{w.ProcessName}] {w.Title}");
     }
     return 0;
 }
 
-var targetResult = WindowLocator.Pick(allWindows, titleFilter, processFilter, pidFilter);
 if (targetResult is null)
 {
     Console.Error.WriteLine(
-        "キャプチャ対象のウィンドウが見つかりませんでした。ウィンドウやプロセスは、--list-windows で一覧できます。");
+        hasFilter
+            ? "指定した条件に合うウィンドウが見つかりませんでした。ウィンドウやプロセスは、--list-windows で一覧できます。"
+            : "キャプチャ対象のウィンドウが見つかりませんでした。ウィンドウやプロセスは、--list-windows で一覧できます。");
     return 1;
 }
 
@@ -129,6 +135,8 @@ var widgetDefaultOverlaySize = new SKSize(
 var widget = new ScreenViewWidget
 {
     WindowHandle = target.Handle,
+    // ワールド表示は常設ヘッダーを消す。dashboard/desktopではピッカーの操作導線を維持する。
+    ShowHeaderBar = useDashboard || useDesktop,
     MaxFps = fpsLimit,
     OverlaySize = initialContent.IsEmpty ? widgetDefaultOverlaySize : initialContent,
     InitialContentSize = initialContent,

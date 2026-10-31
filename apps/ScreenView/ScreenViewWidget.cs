@@ -43,7 +43,7 @@ public sealed record CandidateRefreshResult
 }
 
 /// <summary>
-/// 指定されたウィンドウのライブキャプチャを自身の領域へ表示し、上部のヘッダーバーと
+/// 指定されたウィンドウのライブキャプチャを自身の領域へ表示し、表示モードに応じたヘッダーと
 /// オーバーレイ上のシートからキャプチャ対象を選べるようにするStatefulWidgetです。
 /// </summary>
 /// <remarks>
@@ -63,6 +63,9 @@ public sealed record CandidateRefreshResult
 /// </remarks>
 public record ScreenViewWidget : StatefulWidget<ScreenViewWidget>
 {
+    /// <summary>操作可能なヘッダーを描画する。Worldではfalse、dashboard/desktopではtrue。</summary>
+    public bool ShowHeaderBar { get; init; } = true;
+
     /// <summary>キャプチャするウィンドウのハンドル。</summary>
     public required nint WindowHandle { get; init; }
 
@@ -433,16 +436,18 @@ public record ScreenViewWidget : StatefulWidget<ScreenViewWidget>
             var children = new List<Widget>
             {
                 new Positioned { Top = 0, Left = 0, Right = 0, Bottom = 0, Child = BuildCapture() },
-                new Positioned { Top = 0, Left = 0, Right = 0, Height = HeaderBarHeight, Child = BuildHeaderBar() },
             };
+            // ワールド表示ではキャプチャ画像を最大化。操作方法がないdashboard/desktopではヘッダーを残す。
+            if (Widget!.ShowHeaderBar)
+                children.Add(new Positioned { Top = 0, Left = 0, Right = 0, Height = HeaderBarHeight, Child = BuildHeaderBar() });
 
-            // シートはヘッダーバーの下から下端まで。ウィンドウ一杯のカバーを兼ねる
+            // シートは表示中のヘッダーの下から下端まで。ウィンドウ一杯のカバーを兼ねる
             // (切替直後の空白フレームを覆う)。
             if (_pickerOpen)
             {
                 children.Add(new Positioned
                 {
-                    Top = HeaderBarHeight,
+                    Top = Widget!.ShowHeaderBar ? HeaderBarHeight : 0,
                     Left = 0,
                     Right = 0,
                     Bottom = 0,
@@ -500,9 +505,11 @@ public record ScreenViewWidget : StatefulWidget<ScreenViewWidget>
         {
             // 候補の列挙前(シート未操作時)でもヘッダーに対象名を出せるよう、
             // ショートカットの列挙はしない:分かっている名前だけ使い、分からなければアプリ名を出す。
-            WindowInfo? known = _candidates.FirstOrDefault(w => w.Handle == _currentHandle);
-            var label = known is { } k
-                ? $"{k.ProcessName} — {WindowTargets.ElideMiddle(k.Title, HeaderTitleMaxLength)}"
+            // WindowInfo は構造体のため、FirstOrDefault の該当なしは default(Handle=0, Title=null)。
+            // WindowInfo? に入れても null にならず `is { }` を通ってしまうので、HWND を鍵に確かめる。
+            var knownMatch = _candidates.FirstOrDefault(w => w.Handle == _currentHandle);
+            var label = knownMatch.Handle != 0
+                ? $"{knownMatch.ProcessName} — {WindowTargets.ElideMiddle(knownMatch.Title, HeaderTitleMaxLength)}"
                 : "Screen View";
 
             return new GestureDetector

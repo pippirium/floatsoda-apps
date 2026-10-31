@@ -1,4 +1,5 @@
 using System.Numerics;
+using FloatSoda.Apps.ControllerInput;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using FloatSoda.OVR;
@@ -14,7 +15,7 @@ namespace FloatSoda.Apps.ScreenView;
 /// <remarks>
 /// <para>操作割り当て(<c>--toggle</c> / <c>--switch</c> で変更可能な長押し割当と固定割り当て。SteamVR 入力経由ではない素ポーリング):</para>
 /// <list type="bullet">
-/// <item>グリップ(左右どちらでも) — パネルを掴んで移動。握っている間、そのコントローラの移動差分がそのままパネルの平行移動になる</item>
+/// <item>グリップ(左右どちらでも) — パネルを掴んで移動・回転。手をひねるとパネルの中心を軸に向きが変わり、放すと固定される</item>
 /// <item>右スティック上下(掴んでいないとき) — パネル幅を連続的に拡縮(高さはソース縦横比に自動追従)</item>
 /// <item>左 グリップ+スティック押し込み 長押し(0.7 秒) — パネルの表示/非表示(<c>--toggle</c> で変更可)</item>
 /// <item>右 グリップ+スティック押し込み 長押し(0.3 秒) — キャプチャ対象を選ぶピッカーの開閉(<c>--switch</c> で変更可)</item>
@@ -32,6 +33,7 @@ namespace FloatSoda.Apps.ScreenView;
 /// </remarks>
 public sealed class OverlayManipulator : IDisposable
 {
+    private readonly VrControllerReader _shortcutReader = new();
     private static readonly ulong GripMask = 1UL << (int)EVRButtonId.k_EButton_Grip;
     private static readonly ulong MenuMask = 1UL << (int)EVRButtonId.k_EButton_ApplicationMenu;
     private static readonly ulong StickClickMask = 1UL << (int)EVRButtonId.k_EButton_Axis1;
@@ -72,7 +74,8 @@ public sealed class OverlayManipulator : IDisposable
     private Matrix4x4 _baseline;
     private ETrackingUniverseOrigin _origin = ETrackingUniverseOrigin.TrackingUniverseStanding;
     private uint _dragDeviceIndex = OpenVR.k_unTrackedDeviceIndexInvalid;
-    private Vector3 _lastDevicePosition;
+    private Matrix4x4 _overlayAtGrab;
+    private Matrix4x4 _controllerAtGrab;
     private long _lastTick;
 
     /// <summary>
@@ -204,11 +207,16 @@ public sealed class OverlayManipulator : IDisposable
                 // 放す。ベースラインは最新の絶対座標のまま残る。
                 _dragDeviceIndex = OpenVR.k_unTrackedDeviceIndexInvalid;
             }
-            else if (TryGetDevicePosition(_dragDeviceIndex, poses, out var position))
+            else if (TryGetDevicePose(_dragDeviceIndex, poses, out var controllerPose)
+                && OverlayGrabTransform.TryCalculate(_overlayAtGrab, _controllerAtGrab, controllerPose, out var updated))
             {
-                _baseline.Translation += position - _lastDevicePosition;
-                _lastDevicePosition = position;
+                _baseline = updated;
                 WriteTransform();
+            }
+            else
+            {
+                // 追跡復帰時に古い姿勢との差分で飛ばないよう、次の有効な姿勢で掴み直す。
+                _dragDeviceIndex = OpenVR.k_unTrackedDeviceIndexInvalid;
             }
         }
         else if (leftGrip)
@@ -221,7 +229,9 @@ public sealed class OverlayManipulator : IDisposable
         }
 
         // ---- 右スティックの幅調整と、キャプチャ解像度変更後の手動幅復元 ----
-        ApplyOverlayWidth(right, dt);
+        var shortcutFrame = _shortcutReader.Read();
+        // スクロール用修飾キーを押している間は幅を変えない。手動幅の復元は継続する。
+        ApplyOverlayWidth(shortcutFrame.Modifier ? null : right, dt);
 
         // ---- 長押し割当: パネル表示/非表示(--toggle)、ピッカー開閉(--switch) ----
         ApplyHoldBinding(_toggle, left, right, dt, ref _toggleHold, ref _toggleFired, TogglePanelVisible);
@@ -437,20 +447,23 @@ public sealed class OverlayManipulator : IDisposable
         var origin = ETrackingUniverseOrigin.TrackingUniverseStanding;
         var matrix = new HmdMatrix34_t();
         OpenVR.Overlay.GetOverlayTransformAbsolute(_handle, ref origin, ref matrix).ThrowIfError();
-        if (!TryGetDevicePosition(deviceIndex, poses, out var position)) return false;
+        if (!TryGetDevicePose(deviceIndex, poses, out var controllerPose)) return false;
+
+        var overlayPose = OverlayGrabTransform.ConvertRotationConvention(matrix.ToMatrix4x4());
+        if (!OverlayGrabTransform.TryCalculate(overlayPose, controllerPose, controllerPose, out _)) return false;
 
         _origin = origin;
-        _baseline = matrix.ToMatrix4x4();
-        _lastDevicePosition = position;
+        _baseline = overlayPose;
+        _overlayAtGrab = overlayPose;
+        _controllerAtGrab = controllerPose;
         _dragDeviceIndex = deviceIndex;
         return true;
     }
 
-    /// <summary>ドラッグ結果(ベースラインの平行移動)を OpenVR へ書き戻します。</summary>
+    /// <summary>移動・回転後の姿勢をOpenVRへ書き戻します。</summary>
     private void WriteTransform()
     {
-        // 平行移動のみ更新しているので回転はドラッグ開始時のまま(スティック調整は幅のみ)。
-        var matrix = _baseline.ToHmdMatrix34_t();
+        var matrix = OverlayGrabTransform.ConvertRotationConvention(_baseline).ToHmdMatrix34_t();
         OpenVR.Overlay.SetOverlayTransformAbsolute(_handle, _origin, ref matrix).ThrowIfError();
     }
 
@@ -463,16 +476,15 @@ public sealed class OverlayManipulator : IDisposable
         return OpenVR.System.GetControllerState(deviceIndex, ref state, ControllerStateSize) ? state : null;
     }
 
-    private static bool TryGetDevicePosition(uint deviceIndex, TrackedDevicePose_t[] poses, out Vector3 position)
+    private static bool TryGetDevicePose(uint deviceIndex, TrackedDevicePose_t[] poses, out Matrix4x4 matrix)
     {
-        position = default;
+        matrix = default;
         if (deviceIndex >= poses.Length) return false;
 
         var pose = poses[deviceIndex];
-        if (!pose.bPoseIsValid) return false;
+        if (!pose.bPoseIsValid || !pose.bDeviceIsConnected) return false;
 
-        var matrix = pose.mDeviceToAbsoluteTracking.ToMatrix4x4();
-        position = matrix.Translation;
+        matrix = OverlayGrabTransform.ConvertRotationConvention(pose.mDeviceToAbsoluteTracking.ToMatrix4x4());
         return true;
     }
 
