@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using SkiaSharp;
 using Windows.Win32;
 using Windows.Win32.Foundation;
 
@@ -101,13 +102,48 @@ public static class WindowLocator
         return null;
     }
 
+    /// <summary>ウィンドウのクライアント領域の寸法(ピクセル)を実測します。</summary>
+    /// <remarks>
+    /// オーバーレイの初期比率を対象ウィンドウに合わせるために使う。ウィンドウが見つからない、
+    /// または寸法を測れないときは 0x0 を返す(呼び出し側が既定値へフォールバックする)。
+    /// </remarks>
+    public static SKSize GetWindowClientSize(nint hwnd)
+    {
+        if (!GetClientRect(new HWND(hwnd), out var rect) || rect.Right - rect.Left <= 0 || rect.Bottom - rect.Top <= 0)
+        {
+            return SKSize.Empty;
+        }
+
+        return new SKSize(rect.Right - rect.Left, rect.Bottom - rect.Top);
+    }
+
+    /// <summary>ウィンドウのクライアント領域を取得する(user32)。取得できないときは false。</summary>
+    /// <remarks>CsWin32 の <c>NativeMethods.txt</c> に矩形 API を増やさないため、ここで宣言する。</remarks>
+    [DllImport("user32.dll")]
+    private static extern bool GetClientRect(HWND hWnd, out RECT lpRect);
+
+    /// <summary><see cref="GetClientRect"/> が受け取る矩形。</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RECT
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
     private static string GetWindowText(nint hwnd)
     {
         var length = PInvoke.GetWindowTextLength(new HWND(hwnd));
         if (length == 0) return string.Empty;
 
+        // P/Invoke の戻り値はウィンドウのプロセスが応答しない/終了しかけていると
+        // 0(失敗)になり得る。そのとき buffer は未初期化のまま new string(buffer) に
+        // 渡すと null が返り得る(列挙側の title.Length == 0 で落とせず候補に残り、
+        // 後段の表示で NullReferenceException になる)。失敗は空文字に正規化する。
         Span<char> buffer = stackalloc char[length + 1];
         var copied = PInvoke.GetWindowText(new HWND(hwnd), buffer);
+        if (copied <= 0) return string.Empty;
         return new string(buffer[..copied]);
     }
 }

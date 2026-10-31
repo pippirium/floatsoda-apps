@@ -9,6 +9,14 @@ using FloatSoda.Widgets;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
+if (args.Contains("--voice-diagnostics"))
+{
+    var target = new WindowsCodexVoiceTarget();
+    Console.WriteLine(target.Inspect());
+    foreach (var name in target.DescribeButtons()) Console.WriteLine(name);
+    return;
+}
+
 var builder = Host.CreateApplicationBuilder(args);
 
 builder.Services.AddFloatSoda(new FloatSodaOptions
@@ -26,6 +34,16 @@ var app = host.Services.GetRequiredService<FloatSodaApp>();
 var broker = new ApprovalBroker(a => app.Post(a));
 var input = new WristInputService(broker, a => app.Post(a));
 var server = new WristHttpServer(broker, port);
+using var voice = new CodexVoiceController(new WindowsCodexVoiceTarget(), app.Post);
+using var chatScroll = new CodexChatScrollService();
+using var controllerShortcuts = new ControllerVoiceShortcuts(voice, app.Post, chatScroll.Request);
+var lifetime = host.Services.GetRequiredService<IHostApplicationLifetime>();
+using var controllerStarted = lifetime.ApplicationStarted.Register(controllerShortcuts.Start);
+using var controllerStopping = lifetime.ApplicationStopping.Register(() =>
+{
+    controllerShortcuts.Dispose();
+    chatScroll.Dispose();
+});
 
 // user run
 app.CreateWindow(new DeviceTrackedWindow
@@ -34,10 +52,11 @@ app.CreateWindow(new DeviceTrackedWindow
     Target = TrackedDevice.LeftController,
     Offset = new Vector3(-0.12f, 0, 0.22f),
     Dpm = new Dpm(4000),
-    Child = new WristAgentCard(broker, input),
+    Child = new WristAgentCard(broker, input, voice),
 });
 
 server.Start();
+voice.StartMonitoring();
 
 // ホットキー保険: Ctrl+Alt+Y(はい) / N(いいえ) / C(続行) / T(OSK 入力)。
 // どの保留中要求からも選択できない場合(リスト空)は何もしない。
