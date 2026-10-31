@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Microsoft.Extensions.Logging;
 
 namespace FloatSoda.Samples.WristAgent;
 
@@ -34,12 +35,15 @@ public sealed class ApprovalBroker
     private readonly List<(WristRequest Request, TaskCompletionSource<WristAnswer> Completion)> _pending = [];
     private readonly Queue<(WristRequest Request, WristAnswer Answer)> _history = new();
     private readonly Action<Action>? _post;
+    private readonly ILogger<ApprovalBroker>? _logger;
 
     /// <summary>ブローカーを生成します。</summary>
+    /// <param name="logger">要求の受信・返答を記録するロガー。</param>
     /// <param name="post">任意スレッドからメインスレッドへアクションを投入する処理（<see cref="FloatSodaApp.Post"/>）。</param>
-    public ApprovalBroker(Action<Action>? post = null)
+    public ApprovalBroker(Action<Action>? post = null, ILogger<ApprovalBroker>? logger = null)
     {
         _post = post;
+        _logger = logger;
     }
 
     /// <summary>保留・履歴が変化したことを UI へ通知するイベント。</summary>
@@ -57,6 +61,7 @@ public sealed class ApprovalBroker
     {
         var completion = new TaskCompletionSource<WristAnswer>(TaskCreationOptions.RunContinuationsAsynchronously);
         _incoming.Enqueue((request, completion));
+        _logger?.LogDebug("要求を受信: 種別={Kind}", request.Kind);
 
         // 新着要求の UI 反映はメインスレッドで行う。外部スレッドからは投入のみ。
         _post?.Invoke(DrainIncoming);
@@ -91,6 +96,7 @@ public sealed class ApprovalBroker
         var (request, completion) = _pending[index];
         _pending.RemoveAt(index);
         Remember(request, answer);
+        _logger?.LogDebug("要求へ返答: {Decision}", answer.Decision);
         Changed?.Invoke();
         completion.TrySetResult(answer);
         return true;

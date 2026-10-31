@@ -32,6 +32,10 @@ dotnet run --project apps/WristAgent
 dotnet run --project apps/ScreenView
 ```
 
+WristAgent は `--desktop --debug` でデスクトップ表示とカード内のログ表示を有効にできます。
+この場合も SteamVR の起動と HMD の接続は必要です。詳細は
+[WristAgent の起動手順](apps/WristAgent/README.md#デスクトップでの動作確認とデバッグログ)を参照してください。
+
 ### 旧 `ChromeView` の登録を解除するには
 
 `apps/ChromeView` は `apps/ScreenView` へ改名し、SteamVR の `app_key` も
