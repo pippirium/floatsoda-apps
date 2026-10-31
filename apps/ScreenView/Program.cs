@@ -97,6 +97,12 @@ if (targetResult is null)
 var target = targetResult.Value;
 Console.WriteLine($"キャプチャ対象: PID={target.ProcessId} HWND=0x{target.Handle:X} [{target.ProcessName}] {target.Title}");
 
+if (args.Contains("--scroll-diagnostics"))
+{
+    foreach (var candidate in WindowScrollService.Describe(target.Handle)) Console.WriteLine(candidate);
+    return 0;
+}
+
 if (saveIndex >= 0)
 {
     return await SaveFramesAsync(target, GetOptionValueAfter("--save-frames"));
@@ -116,6 +122,7 @@ var appLifetime = host.Services.GetRequiredService<IHostApplicationLifetime>();
 
 // プログラムで保持して対象切替から使うため外部生成。Start はウィジェット側が行う。
 var captureSession = new WindowCaptureSession(fpsLimit);
+using var scrollService = new WindowScrollService(() => captureSession.CurrentHandle);
 
 // 候補の列挙は Win32 のウィンドウ + プロセス参照を伴うため裏スレッドで走らせ、
 // 結果は Post でメインスレッドへ返す(メインスレッド STA で Win32 列挙を直接やらない)。
@@ -184,6 +191,7 @@ var openVrWorkersStopping = false;
 if (!useDesktop)
 {
     manipulator = new OverlayManipulator("Screen View", toggleSpec, switchSpec);
+    manipulator.ScrollRequested += scrollService.Request;
     // 割当の意味は「次の候補へ巡回」から「ピッカーの開閉」へ変更した。自動巡回は廃止する
     // (一覧が出るため巡回は不要)。入力ループは別スレッドなので Post でメインスレッドへ転送する。
     manipulator.TargetSwitchRequested += () => app.Post(() => widget.TogglePickerRequested?.Invoke());
@@ -231,6 +239,7 @@ void StopOpenVrWorkers()
     try
     {
         manipulator?.StopAndWait();
+        scrollService.Dispose();
     }
     catch (Exception exception)
     {

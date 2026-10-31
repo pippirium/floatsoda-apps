@@ -44,6 +44,11 @@ SteamVR/HMD で確認する場合は、(1) 右スティックで幅を変更、(
 
 ## 起動(SteamVR 起動中)
 
+ScreenViewは「左スティックを中央のまま押し込み + 右スティック上下」で、現在キャプチャしている
+ウィンドウをスクロールできます（グリップを離して操作）。この間はパネルの拡大縮小を行いません。
+対象アプリがWindows UI Automationのスクロールに対応している必要があります。
+WristAgentの音声入力・停止・送信にもレーザー不要の組み合わせがあります（`apps/WristAgent/README.md`）。
+
 ```powershell
 dotnet run --project apps/WristAgent
 dotnet run --project apps/ScreenView

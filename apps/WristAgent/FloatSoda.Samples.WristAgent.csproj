@@ -11,6 +11,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="../ControllerInput/FloatSoda.Apps.ControllerInput.csproj" />
     <ProjectReference Include="..\..\engine\src\FloatSoda\FloatSoda.csproj" />
   </ItemGroup>
 

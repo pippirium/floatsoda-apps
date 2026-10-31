@@ -1,4 +1,5 @@
 using System.Numerics;
+using FloatSoda.Apps.ControllerInput;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using FloatSoda.OVR;
@@ -32,6 +33,9 @@ namespace FloatSoda.Apps.ScreenView;
 /// </remarks>
 public sealed class OverlayManipulator : IDisposable
 {
+    private readonly VrControllerReader _shortcutReader = new();
+    private readonly ControllerScrollState _scrollState = new();
+    public event Action<int>? ScrollRequested;
     private static readonly ulong GripMask = 1UL << (int)EVRButtonId.k_EButton_Grip;
     private static readonly ulong MenuMask = 1UL << (int)EVRButtonId.k_EButton_ApplicationMenu;
     private static readonly ulong StickClickMask = 1UL << (int)EVRButtonId.k_EButton_Axis1;
@@ -221,7 +225,11 @@ public sealed class OverlayManipulator : IDisposable
         }
 
         // ---- 右スティックの幅調整と、キャプチャ解像度変更後の手動幅復元 ----
-        ApplyOverlayWidth(right, dt);
+        var shortcutFrame = _shortcutReader.Read();
+        var scroll = _scrollState.Update(shortcutFrame, Environment.TickCount64 / 1000.0);
+        if (scroll != 0) ScrollRequested?.Invoke(scroll);
+        // スクロール用修飾キーを押している間は幅を変えない。手動幅の復元は継続する。
+        ApplyOverlayWidth(shortcutFrame.Modifier ? null : right, dt);
 
         // ---- 長押し割当: パネル表示/非表示(--toggle)、ピッカー開閉(--switch) ----
         ApplyHoldBinding(_toggle, left, right, dt, ref _toggleHold, ref _toggleFired, TogglePanelVisible);

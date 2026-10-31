@@ -35,6 +35,10 @@ var broker = new ApprovalBroker(a => app.Post(a));
 var input = new WristInputService(broker, a => app.Post(a));
 var server = new WristHttpServer(broker, port);
 using var voice = new CodexVoiceController(new WindowsCodexVoiceTarget(), app.Post);
+using var controllerShortcuts = new ControllerVoiceShortcuts(voice, app.Post);
+var lifetime = host.Services.GetRequiredService<IHostApplicationLifetime>();
+using var controllerStarted = lifetime.ApplicationStarted.Register(controllerShortcuts.Start);
+using var controllerStopping = lifetime.ApplicationStopping.Register(controllerShortcuts.Dispose);
 
 // user run
 app.CreateWindow(new DeviceTrackedWindow
