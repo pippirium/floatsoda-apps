@@ -75,8 +75,13 @@ public static class WindowLocator
         var length = PInvoke.GetWindowTextLength(new HWND(hwnd));
         if (length == 0) return string.Empty;
 
+        // P/Invoke の戻り値はウィンドウのプロセスが応答しない/終了しかけていると
+        // 0(失敗)になり得る。そのとき buffer は未初期化のまま new string(buffer) に
+        // 渡すと null が返り得る(列挙側の title.Length == 0 で落とせず候補に残り、
+        // 後段の表示で NullReferenceException になる)。失敗は空文字に正規化する。
         Span<char> buffer = stackalloc char[length + 1];
         var copied = PInvoke.GetWindowText(new HWND(hwnd), buffer);
+        if (copied <= 0) return string.Empty;
         return new string(buffer[..copied]);
     }
 }
