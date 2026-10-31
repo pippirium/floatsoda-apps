@@ -470,6 +470,16 @@ public record ScreenViewWidget : StatefulWidget<ScreenViewWidget>
         {
             if (_frame is not null)
             {
+                if (_session is not null && _measuredWidth is { } width && _measuredHeight is { } height)
+                {
+                    return new LiveCaptureFrame
+                    {
+                        Session = _session,
+                        ContentSize = new SKSize(width, height),
+                        Fit = Widget!.Fit,
+                        Alignment = Widget!.Alignment,
+                    };
+                }
                 return new FrameImage
                 {
                     Image = _frame!,
