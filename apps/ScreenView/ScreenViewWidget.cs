@@ -66,6 +66,27 @@ public record ScreenViewWidget : StatefulWidget<ScreenViewWidget>
     /// <summary>キャプチャするウィンドウのハンドル。</summary>
     public required nint WindowHandle { get; init; }
 
+    /// <summary>オーバーレイの初期寸法。キャプチャが始まると実測へ追従する。</summary>
+    /// <remarks>
+    /// 既定の 1920x1080 は対象ウィンドウの寸法を知らないまま起動したときの初期値で、確定値ではない。
+    /// 最初のキャプチャ フレームが到着すると <see cref="ScreenViewState"/> が画像の寸法を
+    /// ウィンドウ宣言(<see cref="WindowWidget.Size"/>)へ反映し、オーバーレイは対象の寸法と比率に追従する。
+    /// </remarks>
+    public SKSize OverlaySize { get; init; } = new((float)DefaultOverlayWidth, (float)DefaultOverlayHeight);
+
+    /// <summary>対象ウィンドウの寸法が既知のときの初期寸法。0 は未指定。</summary>
+    /// <remarks>
+    /// 指定しておくとキャプチャ開始前(案内文を出している間)からオーバーレイが対象の比率になる。
+    /// 未指定なら最初のキャプチャ フレームが到着するまで初期寸法を使い続ける。
+    /// </remarks>
+    public SKSize InitialContentSize { get; init; }
+
+    /// <summary>対象ウィンドウの寸法が分からないときのオーバーレイの初期寸法。</summary>
+    public const double DefaultOverlayWidth = 1920;
+
+    /// <summary><see cref="DefaultOverlayWidth"/> の高さ版。</summary>
+    public const double DefaultOverlayHeight = 1080;
+
     /// <summary>状態更新の上限(fps)。</summary>
     /// <remarks>既定は30。0以下はここで切って 30 とみなす。</remarks>
     public int MaxFps { get; init; } = 30;
@@ -152,6 +173,10 @@ public record ScreenViewWidget : StatefulWidget<ScreenViewWidget>
         private bool _isCandidateRefreshing;
         private long _candidateRequestGeneration;
 
+        /// <summary>オーバーレイの実測寸法。キャプチャ画像の寸法がそれ。null は未確定。</summary>
+        private float? _measuredWidth;
+        private float? _measuredHeight;
+
         public ScreenViewState()
         {
             _refreshPickerCallback = RefreshCandidates;
@@ -181,6 +206,13 @@ public record ScreenViewWidget : StatefulWidget<ScreenViewWidget>
                 Console.Error.WriteLine($"[ScreenView] {message}");
                 SetState(() => _message = message);
             };
+            // 対象の寸法が既知なら、キャプチャ開始前からもその比率で構成人を出す。
+            if (Widget!.InitialContentSize is { IsEmpty: false } initial)
+            {
+                _measuredWidth = initial.Width;
+                _measuredHeight = initial.Height;
+            }
+
             _session.Start(_currentHandle);
 
             // コントローラの長押し割当はバックグラウンド スレッドで発火するため、
@@ -193,6 +225,44 @@ public record ScreenViewWidget : StatefulWidget<ScreenViewWidget>
             // ウィジェットが差し替わったら、要求口を新しい側へ結び直す。
             UnbindHooks(oldWidget);
             BindHooks();
+
+            RequestOverlaySizeFromMeasured();
+        }
+
+        /// <summary>依存するウィンドウ宣言が変わった合図として、宣言の作り直しを要求する。</summary>
+        /// <remarks>
+        /// ここは Element の再構築の直前(<see cref="Build"/> より前)なので、宣言の更新をそのまま
+        /// 走らせられる。宣言を作り直すと <see cref="InheritedWidget.UpdateShouldNotify"/> が真に
+        /// なってここへもう一度通知が来るが、次は宣言が実測と一致するため要求を取り下げるだけになり、
+        /// 作り直しは 1 回で収束する。
+        /// </remarks>
+        public override void DidChangeDependencies()
+        {
+            RequestOverlaySizeFromMeasured();
+        }
+
+        /// <summary>実測したキャプチャ画像の寸法へウィンドウ宣言を作り替える。</summary>
+        /// <remarks>
+        /// オーバーレイの寸法はウィンドウ宣言(<see cref="WindowWidget.Size"/>)が決める。engine の
+        /// <c>RenderView</c> は <c>FixedSize</c> が無いとき子へ Unbounded を渡してレイアウト結果を採る
+        /// だけなので、宣言を差し替えるのがオーバーレイ寸法を変える唯一の経路。
+        /// 宣言の更新(<see cref="InheritedElement.Update"/>)は依存 Element の<em>再構築の直前</em>で
+        /// 行うこと。更新の中で依存へ再構築の予約が走るため、予約された再構築より後に宣言を差し替えると
+        /// 子のビルドが古い宣言の値と組んでしまい、オーバーレイの寸法が実測に追いつかない。
+        /// </remarks>
+        private void RequestOverlaySizeFromMeasured()
+        {
+            if (_measuredWidth is not { } width || _measuredHeight is not { } height) return;
+
+            // 依存を登録しない検索を使う。ここで自分へ再構築を予約する必要はない(宣言の更新が
+            // 依存通知として同じ Element を再構築対象にする)。
+            var windowElement = Context.GetElementForInheritedWidgetOfExactType<WindowWidget>();
+            if (windowElement?.Widget is not WindowWidget declared) return;
+
+            var size = new SKSize(width, height);
+            if (declared.Size == size) return;
+
+            windowElement.Update(declared with { Size = size });
         }
 
         /// <summary>現在のウィジェットへ外部からの要求口を登録する。</summary>
@@ -317,10 +387,21 @@ public record ScreenViewWidget : StatefulWidget<ScreenViewWidget>
         /// <summary>キャプチャ スレッドから呼ばれます(WatchWidget と同じ Timer + SetState のパターン)。</summary>
         private void OnFrame(SKImage frame)
         {
+            // オーバーレイの寸法はキャプチャ画像の寸法そのもの。寸法が変わったときだけ宣言を作り直す。
+            var width = (float)frame.Width;
+            var height = (float)frame.Height;
+            var sizeChanged = _measuredWidth != width || _measuredHeight != height;
             SetState(() =>
             {
                 _frame = frame;
                 _message = null;
+                if (sizeChanged)
+                {
+                    // オーバーレイの寸法はウィンドウ宣言(WindowWidget.Size)が決める。実測を覚えておき、
+                    // 次の再構築の前段(DidChangeDependencies)で宣言を作り替える。
+                    _measuredWidth = width;
+                    _measuredHeight = height;
+                }
             });
         }
 
@@ -329,17 +410,16 @@ public record ScreenViewWidget : StatefulWidget<ScreenViewWidget>
             // ウィンドウの寸法を決める 1 枚。engine の RenderView は FixedSize
             // (WindowWidget.Size)が無いとき子へ BoxConstraints.Unbounded を渡すため、
             // オーバーレイの寸法をこのツリーで決める責任がある。
-            // 宣言した寸法をそのまま採用する OverflowBox(Fit.DeferToChild)を使い、Program.cs で
-            // オーバーレイに指定している解像度と揃えた寸法を渡す。中の Stack は Fit.Expand で
-            // その寸法へ広がる。
-            return new OverflowBox
+            // 寸法はキャプチャ画像の実測値(既知の初期値を含む)。未確定のあいだは
+            // ウィンドウ宣言と同じ初期寸法を使い、中の Stack は Fit.Expand でその寸法へ広がる。
+            // ウィンドウ宣言に依存として登録する。宣言が作り直されたときはこの依存が再構築を呼ぶ。
+            var declaredSize = WindowWidget.Of(context).Size;
+            var width = _measuredWidth ?? declaredSize?.Width ?? Widget!.OverlaySize.Width;
+            var height = _measuredHeight ?? declaredSize?.Height ?? Widget!.OverlaySize.Height;
+            return new SizedBox
             {
-                MinWidth = OverlayWidth,
-                MaxWidth = OverlayWidth,
-                MinHeight = OverlayHeight,
-                MaxHeight = OverlayHeight,
-                Fit = OverflowBoxFit.DeferToChild,
-                Alignment = Alignment.TopLeft,
+                Width = width,
+                Height = height,
                 Child = new Stack { Fit = StackFit.Expand, Children = BuildStackChildren() },
             };
         }
@@ -468,11 +548,6 @@ public record ScreenViewWidget : StatefulWidget<ScreenViewWidget>
 
         /// <summary>ヘッダーバーの高さ。シート先端の基準に使う。</summary>
         private const double HeaderBarHeight = 46;
-
-        /// <summary>オーバーレイの既定の解像度。シート内の高さを確定させる基準に使う。</summary>
-        private const double OverlayWidth = 1920;
-        /// <summary><see cref="OverlayWidth"/> の高さ版。</summary>
-        private const double OverlayHeight = 1080;
 
         private static readonly SKColor HeaderColor = SKColor.Parse("#111318");
         private static readonly SKColor ButtonColor = SKColor.Parse("#3C4453");
