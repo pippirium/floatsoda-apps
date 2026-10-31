@@ -10,7 +10,7 @@ using SkiaSharp;
 // 自分のHMD上で任意のウィンドウの画面を見るアプリ。
 // Windows Graphics Capture でアプリ単位の画面を取り込み、FloatSoda の
 // RenderImage でリアルタイムに表示します。キャプチャ対象はオーバーレイ上の
-// ピッカー(上部の [一覧])から選べます。
+// ピッカーから選べます（ワールドはジェスチャ、dashboard/desktopは [一覧]）。
 //
 // 使い方:
 //   --desktop            SteamVRの代わりにデスクトップウィンドウで表示(HMDが不要な目視確認用)
@@ -129,6 +129,8 @@ var widgetDefaultOverlaySize = new SKSize(
 var widget = new ScreenViewWidget
 {
     WindowHandle = target.Handle,
+    // ワールド表示は常設ヘッダーを消す。dashboard/desktopではピッカーの操作導線を維持する。
+    ShowHeaderBar = useDashboard || useDesktop,
     MaxFps = fpsLimit,
     OverlaySize = initialContent.IsEmpty ? widgetDefaultOverlaySize : initialContent,
     InitialContentSize = initialContent,
