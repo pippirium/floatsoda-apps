@@ -1,6 +1,7 @@
 # SteamVR Overlay 起動手順書
 
-作成日: 2026-11-01  
+作成日: 2026-11-01
+
 対象: `floatsoda-apps` の ScreenView と WristAgent。Windows x64 上の PowerShell で操作します。以下の `C:\src\floatsoda-apps` は実際のチェックアウト先に置き換えてください。
 
 ## 1. 起動前の準備
