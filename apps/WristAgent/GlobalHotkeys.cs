@@ -29,7 +29,9 @@ public sealed class GlobalHotkeys
     [DllImport("user32.dll")]
     private static extern short GetAsyncKeyState(int vKey);
 
-    [DllImport("kernel32.dll")]
+    // GetMessage は user32.dll のエクスポート。kernel32.dll だと実行時に
+    // EntryPointNotFoundException になる(ビルドは通る)。
+    [DllImport("user32.dll")]
     private static extern int GetMessage(nint lpMsg, nint hWnd, uint wMsgFilterMin, uint wMsgFilterMax);
 
     private delegate nint LowLevelKeyboardProc(int nCode, nint wParam, nint lParam);
