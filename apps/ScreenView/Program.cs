@@ -121,10 +121,17 @@ var captureSession = new WindowCaptureSession(fpsLimit);
 // 結果は Post でメインスレッドへ返す(メインスレッド STA で Win32 列挙を直接やらない)。
 // 差し出し口(OfferCandidateResult)はウィジェットがマウントされたときに State 側がバインドするため、
 // widget を先に宣言してからこの関数を定義する(ローカル関数を式の中で先に参照できない)。
+// オーバーレイの初期比率を合わせるため、対象ウィンドウの寸法を先に実測する。
+var initialContent = WindowLocator.GetWindowClientSize(target.Handle);
+var widgetDefaultOverlaySize = new SKSize(
+    (float)ScreenViewWidget.DefaultOverlayWidth, (float)ScreenViewWidget.DefaultOverlayHeight);
+
 var widget = new ScreenViewWidget
 {
     WindowHandle = target.Handle,
     MaxFps = fpsLimit,
+    OverlaySize = initialContent.IsEmpty ? widgetDefaultOverlaySize : initialContent,
+    InitialContentSize = initialContent,
     // 対象切替(コントローラ割当・ピッカー)で状態セッションを操作できるよう、外部で作って注入する。
     Session = captureSession,
     CandidateEnumerator = WindowTargets.EnumerateCandidates,
@@ -159,7 +166,8 @@ app.CreateWindow(
             : new WorldSpaceWindow
             {
                 Title = "Screen View",
-                Size = new SKSize(1920, 1080),
+                // 初期寸法。キャプチャが始まるとウィジェットが対象ウィンドウの実測寸法へ更新する。
+                Size = widget.OverlaySize,
                 Child = widget,
                 Position = worldPosition == System.Numerics.Vector3.Zero
                     ? new System.Numerics.Vector3(0f, 1f, -1f)
