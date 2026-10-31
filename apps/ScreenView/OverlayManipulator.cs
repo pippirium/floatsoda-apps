@@ -49,6 +49,9 @@ public sealed class OverlayManipulator : IDisposable
     /// <summary>幅の上限(m)。実用範囲での安全止め。</summary>
     private const float MaxWidth = 4f;
 
+    /// <summary>OpenVR と手動指定幅の差がこの値以下なら再設定しない(m)。</summary>
+    private const float WidthRestoreTolerance = 0.001f;
+
     private readonly string _overlayKey;
     private readonly string _overlayName;
     private readonly ToggleBinding _toggle;
@@ -71,6 +74,12 @@ public sealed class OverlayManipulator : IDisposable
     private uint _dragDeviceIndex = OpenVR.k_unTrackedDeviceIndexInvalid;
     private Vector3 _lastDevicePosition;
     private long _lastTick;
+
+    /// <summary>
+    /// スティックで指定した物理幅(m)。未操作なら null として engine の自動サイズ設定に任せる。
+    /// キャプチャ解像度の変更で engine が幅を再計算しても、この値は変更しない。
+    /// </summary>
+    private float? _userWidthInMeters;
     private bool _handleMissingLogged;
     private bool _errorLogged;
 
@@ -211,28 +220,53 @@ public sealed class OverlayManipulator : IDisposable
             TryStartDrag(rightIndex, poses);
         }
 
-        // ---- 幅調整(掴んでいないときの右スティック上下) ----
-        if (_dragDeviceIndex == OpenVR.k_unTrackedDeviceIndexInvalid && right is { } stick)
-        {
-            // Quest系は旧 OpenVR 規約(上=−y)で来るため符号を反転し、「上=拡大」に揃える。
-            var y = -ReadThumbstickY(stick);
-            if (MathF.Abs(y) > StickDeadZone)
-            {
-                var current = 0f;
-                OpenVR.Overlay.GetOverlayWidthInMeters(_handle, ref current).ThrowIfError();
-                var next = Math.Clamp(current + y * WidthChangeSpeed * dt, MinWidth, MaxWidth);
-                if (MathF.Abs(next - current) > 0.001f)
-                {
-                    OpenVR.Overlay.SetOverlayWidthInMeters(_handle, next).ThrowIfError();
-                }
-            }
-        }
+        // ---- 右スティックの幅調整と、キャプチャ解像度変更後の手動幅復元 ----
+        ApplyOverlayWidth(right, dt);
 
         // ---- 長押し割当: パネル表示/非表示(--toggle)、ピッカー開閉(--switch) ----
         ApplyHoldBinding(_toggle, left, right, dt, ref _toggleHold, ref _toggleFired, TogglePanelVisible);
         if (_switchEnabled)
         {
             ApplyHoldBinding(_switch, left, right, dt, ref _switchHold, ref _switchFired, RequestTargetSwitch);
+        }
+    }
+
+    /// <summary>
+    /// 右スティックではオーバーレイの「物理幅」だけを変更する。
+    /// 高さは OpenVR がキャプチャテクスチャの縦横比から決めるため、画像は引き伸ばされない。
+    /// </summary>
+    /// <remarks>
+    /// engine の OverlayWindow.Resize は画像のピクセル幅 / Dpm から物理幅を再設定する。
+    /// 手動変更後は希望幅を保持し、キャプチャ先の切替・リサイズで上書きされた場合だけ再適用する。
+    /// スティック操作中の基準にも希望幅を使い、engine の一時的な上書きで幅が飛ぶのを防ぐ。
+    /// 一度も手動変更していない間は engine 側の初期幅・自動更新を尊重する。
+    /// </remarks>
+    private void ApplyOverlayWidth(VRControllerState_t? right, float dt)
+    {
+        // 掴み移動中は右スティックで拡縮しないが、既存の手動幅は引き続き維持する。
+        // Quest系は旧 OpenVR 規約(上=−y)で来るため符号を反転し、「上=拡大」に揃える。
+        var y = _dragDeviceIndex == OpenVR.k_unTrackedDeviceIndexInvalid && right is { } stick
+            ? -ReadThumbstickY(stick)
+            : 0f;
+        var isResizing = MathF.Abs(y) > StickDeadZone;
+        if (!isResizing && _userWidthInMeters is null) return;
+
+        var actualWidth = 0f;
+        OpenVR.Overlay.GetOverlayWidthInMeters(_handle, ref actualWidth).ThrowIfError();
+        if (!float.IsFinite(actualWidth) || actualWidth <= 0f) return;
+
+        if (isResizing)
+        {
+            var baseline = _userWidthInMeters ?? actualWidth;
+            _userWidthInMeters = Math.Clamp(baseline + y * WidthChangeSpeed * dt, MinWidth, MaxWidth);
+        }
+
+        // エンジンの再描画・解像度変更で物理幅が戻ったときだけ書き戻す。
+        // 毎ポーリングで Set すると不要な OpenVR 呼び出しが発生するため差分を確認する。
+        if (_userWidthInMeters is { } preferred &&
+            MathF.Abs(preferred - actualWidth) > WidthRestoreTolerance)
+        {
+            OpenVR.Overlay.SetOverlayWidthInMeters(_handle, preferred).ThrowIfError();
         }
     }
 
