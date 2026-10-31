@@ -15,6 +15,28 @@ dotnet run --project apps/WristAgent -- 8801
 
 SteamVR が起動している必要があります。起動すると左腕に `WristAgent` カードが出ます。
 
+## Codexの音声入力
+
+腕カードの上部に常時表示する3つのボタンで、ChatGPTデスクトップアプリ内のCodexを操作します。
+
+| ボタン | 動作 |
+|---|---|
+| 音声入力 | 開いているチャットの音声入力を開始 |
+| 録音停止 | 録音を停止して文字起こし。チャットへは自動送信しない |
+| 送信 | Codexの入力欄にある内容を、開いているチャットへ送信 |
+
+Codexのボタンの状態に合わせて有効・無効が切り替わり、録音中は送信できません。
+文字起こしはCodexが行うため、追加のAPIキーやWristAgent側のマイク設定は不要です。
+Codexのウィンドウは1つ開いてください。表示言語は日本語・英語のボタン名に対応します。
+ボタンを検出できない場合は腕にその状態を表示し、座標クリックやEnterで代用しません。
+Windows UI Automationを使用するため、WristAgentはWindowsデスクトップランタイムが必要です。
+
+読み取り専用の接続確認（録音・送信は行いません）:
+
+```powershell
+dotnet run --project apps/WristAgent -- --voice-diagnostics
+```
+
 ## HTTP プロトコル
 
 `http://127.0.0.1:{port}/requests` へ POST します(ローカルのみ)。
